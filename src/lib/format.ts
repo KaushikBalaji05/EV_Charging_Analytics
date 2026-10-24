@@ -1,0 +1,27 @@
+import { APP_CONFIG } from "@/lib/config";
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const inr = new Intl.NumberFormat(APP_CONFIG.locale, { style: "currency", currency: APP_CONFIG.currency });
+const num1 = new Intl.NumberFormat(APP_CONFIG.locale, { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+const num0 = new Intl.NumberFormat(APP_CONFIG.locale, { maximumFractionDigits: 0 });
+
+export const formatInr = (v: number) => inr.format(v);
+export const formatKwh = (v: number) => `${num1.format(v)} kWh`;
+export const formatKw = (v: number | null) => (v == null ? "—" : `${num1.format(v)} kW`);
+export const formatPct = (v: number | null) => (v == null ? "—" : `${num1.format(v)}%`);
+export const formatInt = (v: number) => num0.format(v);
+
+/**
+ * Formats a stored 'YYYY-MM-DD HH:MM:SS' timestamp WITHOUT creating a Date,
+ * so no time-zone conversion can shift it. Output: "20 Oct 2026, 10:00".
+ */
+export function formatTimestamp(ts: string | null): string {
+  if (!ts) return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(ts);
+  if (!m) return ts;
+  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}, ${m[4]}:${m[5]}`;
+}
+
+export const formatHourRange = (h: number) =>
+  `${String(h).padStart(2, "0")}:00–${String((h + 1) % 24).padStart(2, "0")}:00`;

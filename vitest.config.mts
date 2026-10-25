@@ -4,9 +4,9 @@ import path from "node:path";
 export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(import.meta.dirname, "src"),
       // 'server-only' throws outside Next's server bundle; stub it for unit tests.
-      "server-only": path.resolve(__dirname, "tests/stubs/server-only.ts"),
+      "server-only": path.resolve(import.meta.dirname, "tests/stubs/server-only.ts"),
     },
   },
   test: {

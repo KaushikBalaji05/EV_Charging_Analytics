@@ -1,6 +1,7 @@
 import { Suspense } from "react";
-import { unstable_rethrow } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import type { Metadata } from "next";
+import { getCurrentUser } from "@/lib/auth/dal";
 import { getEnv } from "@/lib/env";
 import { toPublicError } from "@/lib/api/errors";
 import { getOverview, type Overview } from "@/lib/db/queries/overview";
@@ -43,6 +44,16 @@ function Panel({ title, note, children }: { title: string; note?: string; childr
 }
 
 async function OverviewContent({ searchParams }: { searchParams: SearchParams }) {
+  // Authentication is checked on the server before any data is read (the proxy redirect is only a convenience).
+  let user;
+  try {
+    user = await getCurrentUser();
+  } catch (err) {
+    unstable_rethrow(err);
+    return <ErrorPanel title="Could not verify your session" message={toPublicError(err).message} />;
+  }
+  if (!user) redirect("/login");
+
   const raw = await searchParams;
   const flat = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
 

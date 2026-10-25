@@ -7,3 +7,11 @@ export const APP_CONFIG = {
   timezoneLabel: "IST (Asia/Kolkata), as stored",
   maxRangeDays: 366,
 } as const;
+
+export const AUTH = {
+  sessionHours: 8,
+  maxFailedLogins: 5,
+  lockMinutes: 15,
+  minPasswordLength: 12,
+  maxPasswordLength: 128,
+} as const;

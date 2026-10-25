@@ -8,6 +8,12 @@ const EnvSchema = z.object({
     .default("false")
     .transform((v) => v === "true"),
   DATA_MODE: z.enum(["demo", "production"]).default("demo"),
+  // Session cookie "Secure" flag. Unset = on in production, off in development.
+  // Set to "false" only to test a production build over plain http://localhost.
+  COOKIE_SECURE: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "true")),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

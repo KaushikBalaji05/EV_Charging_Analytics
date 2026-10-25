@@ -52,6 +52,14 @@ export function toPublicError(err: unknown): PublicError {
   if (err instanceof ConfigError) {
     return { status: 500, code: "CONFIGURATION_ERROR", message: "The server is not configured correctly. Check the environment variables." };
   }
+  const pgCode = (err as { code?: string })?.code;
+  if (pgCode === "23505") {
+    return { status: 409, code: "ALREADY_EXISTS", message: "A record with these details already exists." };
+  }
+  if (pgCode === "EV001") {
+    // Raised by trigger trg_protect_last_admin (migration 003)
+    return { status: 409, code: "LAST_ADMIN", message: "There must always be at least one active administrator." };
+  }
   if (isDatabaseUnavailable(err)) {
     console.error("[db] unavailable:", (err as { code?: string }).code ?? (err as Error).name);
     return { status: 503, code: "DATABASE_UNAVAILABLE", message: "The database is currently unavailable. Please try again shortly." };

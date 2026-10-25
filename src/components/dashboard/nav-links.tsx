@@ -7,6 +7,7 @@ export interface NavItem {
   href: string;
   label: string;
   ready: boolean;
+  adminOnly?: boolean;
 }
 
 export function NavLinks({ items }: { items: NavItem[] }) {

@@ -50,3 +50,26 @@ export async function query<T extends pg.QueryResultRow>(
   const result = await getPool().query<T>(text, params);
   return result.rows;
 }
+
+/**
+ * Runs fn inside BEGIN ... COMMIT on ONE connection; any thrown error triggers ROLLBACK.
+ * Use for operations that must be atomic (login + lockout counters, user changes + session revocation).
+ */
+export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* connection already broken; the original error is what matters */
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}

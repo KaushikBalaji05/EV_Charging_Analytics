@@ -25,3 +25,12 @@ export function formatTimestamp(ts: string | null): string {
 
 export const formatHourRange = (h: number) =>
   `${String(h).padStart(2, "0")}:00–${String((h + 1) % 24).padStart(2, "0")}:00`;
+
+const instant = new Intl.DateTimeFormat(APP_CONFIG.locale, {
+  timeZone: "Asia/Kolkata",
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+/** For TIMESTAMPTZ values (login times etc.): an exact instant, displayed in IST. */
+export const formatInstant = (d: Date | string | null) => (d ? `${instant.format(new Date(d))} IST` : "Never");

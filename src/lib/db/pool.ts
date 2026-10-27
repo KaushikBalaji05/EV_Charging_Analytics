@@ -6,16 +6,17 @@ import { getEnv } from "@/lib/env";
 const OID_INT8 = 20; // BIGINT / BIGSERIAL
 const OID_NUMERIC = 1700;
 const OID_TIMESTAMP = 1114; // TIMESTAMP WITHOUT TIME ZONE
+const OID_DATE = 1082; // DATE
 
 /**
  * Per-pool type parsers (not global):
- *  - TIMESTAMP stays a plain 'YYYY-MM-DD HH:MM:SS' string. pg's default turns it into a JS Date
+ *  - TIMESTAMP and DATE stay plain 'YYYY-MM-DD HH:MM:SS' string. pg's default turns it into a JS Date
  *    interpreted in the *server's* time zone, which would silently shift stored values.
  *  - NUMERIC and BIGINT arrive as strings by default; convert to numbers for charts and maths.
  */
 const types = {
   getTypeParser(oid: number, format?: "text" | "binary") {
-    if (oid === OID_TIMESTAMP) return (v: string) => v;
+    if (oid === OID_TIMESTAMP || oid === OID_DATE) return (v: string) => v;
     if (oid === OID_NUMERIC || oid === OID_INT8) return (v: string) => Number(v);
     return pg.types.getTypeParser(oid, format as "text");
   },

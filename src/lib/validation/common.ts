@@ -9,7 +9,7 @@ function isRealDate(s: string): boolean {
 }
 
 /** Blank form fields arrive as "" and mean "no filter". */
-const emptyToUndefined = (v: unknown) => (v === "" || v === null ? undefined : v);
+export const emptyToUndefined = (v: unknown) => (v === "" || v === null ? undefined : v);
 
 export const dateOnly = z.preprocess(
   emptyToUndefined,
@@ -20,21 +20,28 @@ export const dateOnly = z.preprocess(
     .optional(),
 );
 
-/** Inclusive date range. Both bounds optional; when both are present from <= to and the span is capped. */
-export const DateRangeSchema = z
-  .object({ from: dateOnly, to: dateOnly })
-  .superRefine((v, ctx) => {
-    if (v.from && v.to) {
-      if (v.from > v.to) {
-        ctx.addIssue({ code: "custom", path: ["from"], message: "'from' must be on or before 'to'" });
-        return;
-      }
-      const days = (Date.parse(v.to) - Date.parse(v.from)) / MS_PER_DAY + 1;
-      if (days > APP_CONFIG.maxRangeDays) {
-        ctx.addIssue({ code: "custom", path: ["to"], message: `Range cannot exceed ${APP_CONFIG.maxRangeDays} days` });
-      }
+/** The two optional date fields shared by every filterable endpoint. */
+export const DateRangeShape = { from: dateOnly, to: dateOnly };
+
+/** When both bounds are present: from <= to and the span is capped. Reused by every range-filtered schema. */
+export function checkDateRange(
+  v: { from?: string; to?: string },
+  ctx: { addIssue: (issue: { code: "custom"; path: string[]; message: string }) => void },
+): void {
+  if (v.from && v.to) {
+    if (v.from > v.to) {
+      ctx.addIssue({ code: "custom", path: ["from"], message: "'from' must be on or before 'to'" });
+      return;
     }
-  });
+    const days = (Date.parse(v.to) - Date.parse(v.from)) / MS_PER_DAY + 1;
+    if (days > APP_CONFIG.maxRangeDays) {
+      ctx.addIssue({ code: "custom", path: ["to"], message: `Range cannot exceed ${APP_CONFIG.maxRangeDays} days` });
+    }
+  }
+}
+
+/** Inclusive date range. Both bounds optional. */
+export const DateRangeSchema = z.object(DateRangeShape).superRefine(checkDateRange);
 
 export type DateRange = z.infer<typeof DateRangeSchema>;
 

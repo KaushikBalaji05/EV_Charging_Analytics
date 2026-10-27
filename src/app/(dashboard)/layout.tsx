@@ -1,15 +1,16 @@
 import { Suspense } from "react";
 import { NavLinks, type NavItem } from "@/components/dashboard/nav-links";
+import { StaticNav } from "@/components/dashboard/static-nav";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { getCurrentUser } from "@/lib/auth/dal";
 
 // Pages are switched on as each build stage lands; unbuilt ones render as disabled.
 const NAV: NavItem[] = [
   { href: "/", label: "Overview", ready: true },
-  { href: "/demand", label: "Demand analytics", ready: false },
-  { href: "/stations", label: "Station explorer", ready: false },
-  { href: "/overloads", label: "Overload explorer", ready: false },
-  { href: "/sessions", label: "Charging sessions", ready: false },
+  { href: "/demand", label: "Demand analytics", ready: true },
+  { href: "/stations", label: "Station explorer", ready: true },
+  { href: "/overloads", label: "Overload explorer", ready: true },
+  { href: "/sessions", label: "Charging sessions", ready: true },
   { href: "/admin/users", label: "User management", ready: true, adminOnly: true },
   { href: "/admin", label: "Data administration", ready: false, adminOnly: true },
 ];
@@ -50,12 +51,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Mobile: collapsible menu. Desktop: always visible. */}
         <details className="group px-2 pb-2 lg:hidden">
           <summary className="cursor-pointer list-none rounded px-3 py-2 text-sm font-medium text-charge">Menu</summary>
-          <Suspense fallback={<NavLinks items={publicItems} />}>
+          <Suspense fallback={<StaticNav items={publicItems} />}>
             <SidebarNav />
           </Suspense>
         </details>
         <div className="hidden flex-1 px-2 lg:block">
-          <Suspense fallback={<NavLinks items={publicItems} />}>
+          <Suspense fallback={<StaticNav items={publicItems} />}>
             <SidebarNav />
           </Suspense>
         </div>

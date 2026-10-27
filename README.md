@@ -10,8 +10,8 @@ MongoDB integration is planned (see *Status*).
 | 1 | Next.js foundation, `pg` connection, env handling, API response/error layer | Done |
 | 2 | Migration 002 (views, trigger, indexes), `GET /api/overview`, Overview dashboard | Done |
 | 3 | Authentication, Admin / Analyst roles, user management | Done (see *Known limitations*) |
-| 4 | Demand, Station, Overload and Session explorers | Next |
-| 5 | Admin CRUD for stations/chargers/sessions with transactions | Planned |
+| 4 | Demand Analytics, Station Explorer and Details, Overload Explorer, Session Explorer (migration 004) | Done (see *Known limitations*) |
+| 5 | Admin CRUD for stations/chargers/sessions with transactions | Next |
 | 6 | MongoDB telemetry integration (waiting for teammate's data contract) | Planned |
 | 7 | Demo seed data, final docs, requirement mapping | Planned |
 
@@ -25,9 +25,10 @@ Node.js 22+, npm, and PostgreSQL with the `ev_charging_analytics` database creat
 ```bash
 npm install
 
-# 1. Apply the additive migrations, in order. Both are safe to re-run and never drop or alter existing objects.
+# 1. Apply the additive migrations, in order. All are safe to re-run and never drop or alter existing objects.
 psql -U <your_user> -d ev_charging_analytics -f database/migrations/002_analytics_views_and_triggers.sql
 psql -U <your_user> -d ev_charging_analytics -f database/migrations/003_users_and_sessions.sql
+psql -U <your_user> -d ev_charging_analytics -f database/migrations/004_session_detail_view.sql
 
 # 2. Configure the environment (.env.local is git-ignored; never commit it)
 cp .env.example .env.local          # then set DATABASE_URL
@@ -51,7 +52,7 @@ npm test            # unit tests always run; integration tests run when DATABASE
 npm run build
 ```
 
-Integration tests need migrations 002 and 003 applied and the repository's own sample data loaded, nothing else.
+Integration tests need migrations 002, 003 and 004 applied and the repository's own sample data loaded, nothing else.
 The auth tests create their own throw-away users (`test+<random>@example.test`, random passwords) and remove them afterwards;
 they never read or change other accounts.
 
@@ -60,7 +61,7 @@ they never read or change other accounts.
 | Role | Can do |
 |---|---|
 | Anonymous | Open `/login`; `GET /api/health` (connectivity only). Everything else returns 401 / redirects to `/login` |
-| Analyst | Everything anonymous can, plus dashboards and read APIs (`/api/overview`, `/api/auth/me`) |
+| Analyst | Everything anonymous can, plus every dashboard page (Overview, Demand, Stations, Station details, Overloads, Sessions) and all read APIs (`/api/overview`, `/api/demand/*`, `/api/stations/*`, `/api/overloads`, `/api/sessions`, `/api/auth/me`) |
 | Admin | Everything an Analyst can, plus user management (`/api/admin/users`, `/admin/users`) and the detailed health report |
 
 Authorization is enforced on the server in `src/lib/auth/dal.ts` on every protected page and API call. Hiding a menu link is cosmetic only.
@@ -76,10 +77,22 @@ State-changing requests from a browser must come from the same origin (otherwise
 | `POST /api/auth/logout` | public | Revokes the session server-side, clears the cookie |
 | `GET /api/auth/me` | Analyst+ | Current user |
 | `GET /api/overview?from=&to=` | Analyst+ | KPIs, hourly demand, station comparison, alerts (dates `YYYY-MM-DD`, optional, inclusive) |
+| `GET /api/demand/hourly?station_id=&from=&to=` | Analyst+ | Energy per hour of day (24 rows). Each session's energy is split across the hours it spans |
+| `GET /api/demand/daily?station_id=&from=&to=` | Analyst+ | Per-day energy, sessions, revenue and a 7-day moving average; empty days are zero-filled |
+| `GET /api/stations?q=&status=&sort=&order=&from=&to=&page=&page_size=` | Analyst+ | Paginated station list with session, energy, revenue, charger-capacity and utilization metrics. `sort`: `name`, `location`, `energy`, `sessions`, `revenue`, `utilization`, `overloads` |
+| `GET /api/stations/ranking?metric=&limit=&from=&to=` | Analyst+ | SQL `RANK()` of stations. `metric`: `energy`, `sessions`, `revenue`, `utilization`, `overloads` |
+| `GET /api/stations/[id]?from=&to=` | Analyst+ | One station's summary plus its chargers |
+| `GET /api/stations/[id]/capacity?from=&to=&limit=` | Analyst+ | Capacity snapshots (load vs permitted load), newest first; utilization is not capped at 100 |
+| `GET /api/stations/[id]/telemetry?from=&to=&limit=` | Analyst+ | Grid telemetry readings, newest first. A separate series from capacity snapshots |
+| `GET /api/stations/[id]/overloads?from=&to=&sort=&order=&page=&page_size=` | Analyst+ | Overload history of one station |
+| `GET /api/overloads?station_id=&from=&to=&sort=&order=&page=&page_size=` | Analyst+ | Overloaded capacity snapshots (view `v_overload_events`) with the overload amount and the nearest telemetry reading. `sort`: `time`, `utilization`, `overload` |
+| `GET /api/sessions?station_id=&charger_id=&q=&status=&from=&to=&sort=&order=&page=&page_size=` | Analyst+ | Paginated sessions (view `v_session_details`). `q` searches registration, model, station name. `status`: `all`, `ongoing`, `completed`. `sort`: `start`, `energy`, `cost`, `duration`, `peak` |
 | `GET /api/admin/users` | Admin | List users (never includes password hashes) |
 | `POST /api/admin/users` | Admin | `{ email, displayName, role, password }` -> `201`; `409` if the email exists |
 | `PATCH /api/admin/users/[id]` | Admin | Any of `{ displayName, role, isActive, password }`; `404` unknown id; `409` if it would remove the last active admin |
 | `GET /api/health` | public / Admin | Public: `{ database }`. Admin: also latency and applied migrations |
+
+`page_size` is 1-100 (default 20), `page` 1-10000, `limit` as documented per endpoint. Any `sort`, `metric`, `status` or `order` outside its allowlist is a `400`; an unknown `station_id` is a `404`.
 
 Status codes: `200`/`201` OK, `400` invalid input (field-level messages), `401` not signed in, `403` signed in but not allowed,
 `404` not found, `409` conflict, `413` body too large, `503` database unavailable, `500` anything else.
@@ -102,6 +115,13 @@ SQL text, stack traces, password hashes and connection details are never returne
 - **Date filter**: `from` is the start of that day; `to` includes the whole day.
 - **Capacity snapshot vs telemetry reading**: a snapshot (`Station_Capacity`) compares load with the permitted limit; a telemetry reading (`Grid_Telemetry`) is an electrical measurement. The UI keeps them separate.
 - **Timestamps**: analytics columns are `TIMESTAMP` without time zone, treated as IST wall-clock time and shown exactly as stored. Auth tables use `TIMESTAMPTZ`; the Users page shows those in IST.
+- **Charger capacity vs station limit**: *installed charger capacity* is the sum of `rated_power_kw` over a station's chargers; the *station limit* is `charging_station.total_capacity_kw`, the load the station may draw. They are different numbers and both are shown.
+- **Daily demand**: energy is attributed to the day a session *started* (hourly demand splits energy across hours, as above). Days without sessions are shown as zero. Spans over 366 days keep the most recent 366 and say so.
+- **Trend**: the latest window of up to 7 days compared with the window before it (needs at least 2 days; no percentage if the earlier window had no energy).
+- **Station rank**: SQL `RANK()` among *all* stations for the chosen metric; ties share a rank. A station keeps its rank when you search or filter the list.
+- **Overload amount**: `current_load_kw - max_load_kw` for a snapshot above its limit. Utilization above 100% is shown in red with an explicit "over limit" label.
+- **Nearest telemetry reading** (Overload Explorer): the `Grid_Telemetry` reading closest in time within ±15 minutes of the capacity snapshot, shown only for comparison. It is a different measurement and may be absent.
+- **Ongoing sessions** (`end_time` is NULL): shown as "In progress"; duration is never invented (it is NULL), they sort last when sorting by duration, and their energy so far counts in totals and in their start hour/day.
 - **Demo data**: with `DATA_MODE=demo` the UI states that readings are synthetic and never calls them live.
 
 ## Advanced DBMS concepts implemented so far
@@ -114,9 +134,23 @@ SQL text, stack traces, password hashes and connection details are never returne
 | Transaction | `authenticate()` (login + lockout counters + session creation) and `updateUser()` (change + session revocation), via `withTransaction` | Lock an account with 5 wrong passwords: the failure counter persists even though login failed; `SELECT ... FOR UPDATE` serialises guesses |
 | Constraints | CHECKs on role/email/expiry, UNIQUE email, FK `ON DELETE CASCADE` from `auth_session` to `app_user` (003) | Insert `role='OWNER'` or a mixed-case email: rejected by the database |
 | Indexes | `idx_capacity_overloaded_time` (partial), `idx_telemetry_recorded_at`, `idx_charger_station` (002); `uq_app_user_email`, session indexes (003) | `EXPLAIN` the overload query. On the 3-row sample PostgreSQL correctly prefers a sequential scan; `SET enable_seqscan = off;` shows the partial index is usable. The benefit appears at volume (Stage 7 seed data) |
-| Parameterized queries | `src/lib/db/queries/*` | Every value is a bound parameter; try `?from=2026-10-20';DROP TABLE ev;--` and see a `400` |
+| View (Stage 4) | `v_session_details` (migration 004): session + vehicle + charger + station, with `duration_minutes` and `is_ongoing`. Used by the Session Explorer, Demand Analytics and Station metrics | `SELECT * FROM v_session_details;` |
+| Window functions | `RANK() OVER (...)` for station rankings (`stations.ts`); `AVG(...) OVER (ORDER BY day ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)` for the 7-day moving average (`demand.ts`) | `GET /api/stations/ranking?metric=utilization`; `GET /api/demand/daily` |
+| CTEs and set generation | Metrics CTE in `stations.ts`; `generate_series` to zero-fill days and split sessions across hours (`overview.ts`, `demand.ts`) | `GET /api/demand/daily?from=2026-10-19&to=2026-10-21` shows the empty days as zeros |
+| LATERAL join | Nearest telemetry reading per overload row (`overloads.ts`) | Overload Explorer's last column, or `GET /api/overloads` |
+| Indexes in use | With sequential scans disabled on the 3-row sample, `EXPLAIN` shows: session date filter -> `idx_session_start_time`; station capacity history -> `idx_capacity_station_time`; overload list -> `idx_capacity_overloaded_time`; telemetry lookup -> `idx_telemetry_recorded_at` | `SET enable_seqscan = off; EXPLAIN SELECT * FROM v_session_details WHERE start_time >= '2026-10-20' AND start_time < '2026-10-21';` (on tiny tables PostgreSQL normally prefers sequential scans; the benefit appears at volume) |
+| Parameterized queries | `src/lib/db/queries/*` | Every value is a bound parameter; sort keys and metrics are allowlisted and mapped to fixed SQL. Try `/api/stations?sort=energy;DROP TABLE ev` (400) or search for `%` or `' OR 1=1` (matched literally, no rows) |
 
 MongoDB aggregation/indexes (Stage 6) are not implemented yet.
+
+## Known limitations (Stage 4)
+
+- **Not verified in a real browser** (no browser was available where this was built). Pages were checked through HTTP and server-rendered HTML, and all queries and APIs by automated tests. **The charts (hourly, daily, utilization history, telemetry trend) have never been rendered in a browser by the author**; please open each page once.
+- The unknown-station page (`/stations/9999`) shows a "Station not found" panel with HTTP 200, not a 404 status, because the content streams.
+- Search uses `ILIKE '%text%'`, which PostgreSQL cannot serve from a normal index. That is fine at project scale; at large volume a trigram index (`pg_trgm`) would be the next step.
+- Pagination uses `LIMIT/OFFSET` (page numbers up to 10,000). Keyset pagination would scale better but is unnecessary here.
+- Daily and hourly figures are computed in the database on every request (no caching), so they always reflect the data.
+- Integration tests that insert rows (an ongoing session, an extra overload) use clearly marked rows, remove them afterwards, and rely on test files running one at a time (`fileParallelism: false`). If a test run is killed mid-way, the next run cleans up leftovers (`ZZTEST-` vehicles, snapshots dated 2026-10-22).
 
 ## Known limitations (Stage 3)
 

@@ -49,3 +49,20 @@ export function OverviewSkeleton() {
     </div>
   );
 }
+
+/** Generic loading placeholder for list/analytics pages. */
+export function PageSkeleton() {
+  return (
+    <div role="status" aria-label="Loading" className="space-y-6">
+      <div className={`${block} h-16`} />
+      <div className="grid grid-cols-2 gap-px lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className={`${block} h-24`} />
+        ))}
+      </div>
+      <div className={`${block} h-72`} />
+      <div className={`${block} h-48`} />
+      <span className="sr-only">Loading…</span>
+    </div>
+  );
+}

@@ -34,3 +34,24 @@ const instant = new Intl.DateTimeFormat(APP_CONFIG.locale, {
 
 /** For TIMESTAMPTZ values (login times etc.): an exact instant, displayed in IST. */
 export const formatInstant = (d: Date | string | null) => (d ? `${instant.format(new Date(d))} IST` : "Never");
+
+/** Compact stamp for chart axes: "20 Oct 10:00". Never builds a Date, so no time-zone shift. */
+export function formatShortTimestamp(ts: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(ts);
+  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[4]}:${m[5]}` : ts;
+}
+
+/** "2026-10-20" -> "20 Oct 2026" (a calendar day has no time zone to convert). */
+export function formatDay(d: string | null): string {
+  const m = d ? /^(\d{4})-(\d{2})-(\d{2})/.exec(d) : null;
+  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : "—";
+}
+
+/** 135 -> "2 h 15 min". Null (ongoing session) -> "—". */
+export function formatDuration(minutes: number | null): string {
+  if (minutes == null) return "—";
+  const total = Math.round(minutes);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h > 0 ? `${h} h ${m} min` : `${m} min`;
+}

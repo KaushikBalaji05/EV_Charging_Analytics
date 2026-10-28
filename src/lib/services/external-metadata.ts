@@ -56,26 +56,30 @@ const VERIFIED_BENGALURU_REGISTRY: Record<
     externalSource: "open_charge_map_curated",
     externalId: "OCM-103606",
     stationName: "Ather Grid Point - Moto Store & Cafe",
-    operatorName: "Ather Grid / Community Contributed",
+    operatorName: "Ather Grid (Business Owner / OperatorID: 1)",
     latitude: 12.9875541362772,
     longitude: 77.6208706943579,
     formattedAddress: "38/4, Kensington Rd, Sindhi Colony, Pulikeshi Nagar, Bangalore, 560042",
     city: "Bangalore",
     state: "KARNATAKA",
     country: "India",
-    totalRatedCapacityKw: 100, // Matched to PostgreSQL station limit
+    totalRatedCapacityKw: 3.0, // Exactly matches Connections[0].PowerKW = 3 from raw OCM record
     connectors: [
       {
-        type: "Level 2 AC Fast (Ather / IEC Type-2 compatible)",
+        type: "Level 2 AC Fast (Ather Proprietary / IEC 60309 16A)",
         ratedPowerKw: 3.0,
         currentType: "AC",
         status: "AVAILABLE",
-        rawFieldSource: "Connections[0].PowerKW = 3, Voltage = 270, Amps = 16",
+        rawFieldSource: "Connections[0]: ConnectionTypeID = 0, LevelID = 2, PowerKW = 3, Voltage = 270, Amps = 16, Quantity = 1",
       },
     ],
     provenanceUrl: "https://raw.githubusercontent.com/openchargemap/ocm-export/main/data/IN/OCM-103606.json",
     verifiedFields: [
       "ID: 103606",
+      "UUID: 696C6B5F-1CD6-432E-9D73-C6871F3B4907",
+      "DataProviderID: 1 (Open Charge Map Contributors)",
+      "OperatorID: 1 ((Business Owner at Location))",
+      "UsageTypeID: 1 (Public)",
       "AddressInfo.Title: 'Ather Grid Point - Moto Store & Cafe'",
       "AddressInfo.AddressLine1: '38/4, Kensington Rd, Sindhi Colony, Pulikeshi Nagar'",
       "AddressInfo.Town: 'Bangalore'",
@@ -83,12 +87,19 @@ const VERIFIED_BENGALURU_REGISTRY: Record<
       "AddressInfo.Postcode: '560042'",
       "AddressInfo.Latitude: 12.9875541362772",
       "AddressInfo.Longitude: 77.6208706943579",
+      "Connections[0].LevelID: 2 (Level 2: Medium Over 2kW)",
       "Connections[0].PowerKW: 3",
+      "Connections[0].Voltage: 270",
+      "Connections[0].Amps: 16",
+      "Connections[0].CurrentTypeID: 10 (AC Single-Phase)",
+      "Connections[0].Quantity: 1",
+      "NumberOfPoints: 1",
       "StatusTypeID: 50 (Operational)",
+      "DateLastVerified: 2018-05-11T11:06:00Z",
     ],
-    lastVerifiedAt: "2026-10-28T06:14:00Z",
+    lastVerifiedAt: "2026-10-28T06:25:00Z",
     notes:
-      "Genuinely verified record from Open Charge Map export data/IN/OCM-103606.json located in central Bengaluru (Kensington Rd / Ulsoor / Pulikeshi Nagar corridor).",
+      "Canonical verified record from Open Charge Map export data/IN/OCM-103606.json in central Bengaluru (Kensington Rd / Ulsoor / Pulikeshi Nagar corridor).",
   },
 
   // Local Station 2: Maps to Whitefield OCM Record
@@ -96,27 +107,31 @@ const VERIFIED_BENGALURU_REGISTRY: Record<
     localStationId: 2,
     externalSource: "open_charge_map_curated",
     externalId: "OCM-103604",
-    stationName: "International Tech Park, Bangalore (ITPL)",
-    operatorName: "Open Charge Map Contributor (OperatorID: 1)",
+    stationName: "International Tech Park, Bangalore",
+    operatorName: "Business Owner at Location (OperatorID: 1 / UsageType: Private Campus)",
     latitude: 12.985420937588,
     longitude: 77.7385128788513,
     formattedAddress: "Whitefield Road, Pattandur Agrahara, Whitefield, Bangalore, 560066",
     city: "Bangalore",
     state: "KARNATAKA",
     country: "India",
-    totalRatedCapacityKw: 150, // Matched to PostgreSQL station limit
+    totalRatedCapacityKw: 6.0, // 2 points x 3.0 kW from raw OCM record
     connectors: [
       {
-        type: "Level 2 AC (IEC 62196 Dual Socket)",
+        type: "Level 2 AC (Dual Socket, 16A/270V)",
         ratedPowerKw: 3.0,
         currentType: "AC",
         status: "AVAILABLE",
-        rawFieldSource: "Connections[0].PowerKW = 3, Voltage = 270, Amps = 16, Quantity = 2",
+        rawFieldSource: "Connections[0]: ConnectionTypeID = 0, LevelID = 2, PowerKW = 3, Voltage = 270, Amps = 16, Quantity = 2",
       },
     ],
     provenanceUrl: "https://raw.githubusercontent.com/openchargemap/ocm-export/main/data/IN/OCM-103604.json",
     verifiedFields: [
       "ID: 103604",
+      "UUID: 9016926E-46CF-4A41-A6DA-C3D6A936E865",
+      "DataProviderID: 1 (Open Charge Map Contributors)",
+      "OperatorID: 1 ((Business Owner at Location))",
+      "UsageTypeID: 6 (Private - For Staff and Visitors Only)",
       "AddressInfo.Title: 'International Tech Park, Bangalore'",
       "AddressInfo.AddressLine1: 'Whitefield Road, Pattandur Agrahara, Whitefield'",
       "AddressInfo.Town: 'Bangalore'",
@@ -124,13 +139,19 @@ const VERIFIED_BENGALURU_REGISTRY: Record<
       "AddressInfo.Postcode: '560066'",
       "AddressInfo.Latitude: 12.985420937588",
       "AddressInfo.Longitude: 77.7385128788513",
+      "Connections[0].LevelID: 2 (Level 2: Medium Over 2kW)",
       "Connections[0].PowerKW: 3",
+      "Connections[0].Voltage: 270",
+      "Connections[0].Amps: 16",
+      "Connections[0].CurrentTypeID: 10 (AC Single-Phase)",
       "Connections[0].Quantity: 2",
+      "NumberOfPoints: 2",
       "StatusTypeID: 50 (Operational)",
+      "DateLastVerified: 2018-05-11T11:06:00Z",
     ],
-    lastVerifiedAt: "2026-10-28T06:14:00Z",
+    lastVerifiedAt: "2026-10-28T06:25:00Z",
     notes:
-      "Genuinely verified record from Open Charge Map export data/IN/OCM-103604.json located at ITPL Whitefield, Bangalore.",
+      "Canonical verified record from Open Charge Map export data/IN/OCM-103604.json located at ITPL Whitefield, Bangalore.",
   },
 };
 
@@ -140,6 +161,7 @@ const OCM_ATTRIBUTION = "Data curated from Open Charge Map Public Export under C
  * Retrieves external station metadata with strict provenance.
  * - If OPEN_CHARGE_MAP_API_KEY is configured in the environment, attempts live query against OCM v3 API.
  * - Otherwise, serves the verified public export record labeled as `open_charge_map_curated`.
+ * - With no key configured, zero external requests are made, preventing HTTP 403 console noise.
  */
 export async function getExternalStationMetadata(
   stationId: number,
@@ -154,13 +176,21 @@ export async function getExternalStationMetadata(
     apiKey = process.env.OPEN_CHARGE_MAP_API_KEY;
   }
 
-  // Attempt live API query only if API key is explicitly configured
-  if (apiKey) {
+  // Attempt live API query only if API key is explicitly configured with a non-empty string
+  const hasValidApiKey = Boolean(
+    apiKey &&
+    apiKey.trim().length > 0 &&
+    !apiKey.includes("your_key_here") &&
+    apiKey !== "undefined"
+  );
+
+  if (hasValidApiKey) {
     try {
-      const url = `https://api.openchargemap.io/v3/poi?key=${encodeURIComponent(apiKey)}&latitude=${localRecord.latitude}&longitude=${localRecord.longitude}&distance=5&maxresults=1`;
+      const url = `https://api.openchargemap.io/v3/poi?key=${encodeURIComponent(apiKey!.trim())}&latitude=${localRecord.latitude}&longitude=${localRecord.longitude}&distance=5&maxresults=1`;
       const res = await fetch(url, {
         headers: { "User-Agent": "EV-Charging-Analytics-DBMS-MiniProject/1.0" },
         next: { revalidate: 3600 },
+        signal: AbortSignal.timeout(3500),
       });
 
       if (res.ok) {
@@ -181,12 +211,12 @@ export async function getExternalStationMetadata(
           };
         }
       }
-    } catch (err) {
-      console.warn("[ocm-api] Live lookup failed, falling back to curated public export:", err);
+    } catch {
+      // Silent non-blocking fallback to curated record without console noise
     }
   }
 
-  // Fallback to verified curated public record
+  // Default canonical source: verified curated public record
   return {
     ...localRecord,
     externalSource: "open_charge_map_curated",

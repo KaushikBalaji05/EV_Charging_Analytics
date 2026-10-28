@@ -37,7 +37,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
       liveTelemetry,
       regionalGrid,
       sourceSummary: {
-        metadataSource: "open_charge_map",
+        metadataSource: externalMetadata?.externalSource ?? "open_charge_map_curated",
         telemetrySource: "simulated",
         gridContextSource: "central_electricity_authority",
       },

@@ -35,11 +35,13 @@ describe("Hybrid Architecture & Data Provenance (Unit Tests)", () => {
     expect(st1?.connectors.length).toBeGreaterThanOrEqual(1);
     expect(st1?.connectors[0].ratedPowerKw).toBe(3.0);
     expect(st1?.connectors[0].currentType).toBe("AC");
+    expect(st1?.totalRatedCapacityKw).toBe(3.0);
     expect(st1?.connectors[0].rawFieldSource).toContain("PowerKW = 3");
 
     const st2 = await getExternalStationMetadata(2);
     expect(st2?.connectors.length).toBeGreaterThanOrEqual(1);
     expect(st2?.connectors[0].ratedPowerKw).toBe(3.0);
+    expect(st2?.totalRatedCapacityKw).toBe(6.0);
     expect(st2?.connectors[0].rawFieldSource).toContain("Quantity = 2");
   });
 

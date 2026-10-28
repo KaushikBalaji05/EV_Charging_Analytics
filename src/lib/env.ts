@@ -14,6 +14,8 @@ const EnvSchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === "true")),
+  MONGODB_URI: z.string().default("mongodb://127.0.0.1:27017"),
+  MONGODB_DB_NAME: z.string().default("ev_charging_analytics"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

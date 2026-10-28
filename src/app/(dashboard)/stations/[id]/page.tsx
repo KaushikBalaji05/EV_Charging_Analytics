@@ -24,6 +24,7 @@ import { EmptyState, ErrorPanel, PageSkeleton } from "@/components/dashboard/sta
 import { TableShell, td, tdRight, th, thRight } from "@/components/dashboard/tables";
 import { TelemetryTrendChart } from "@/components/dashboard/telemetry-trend-chart";
 import { UtilizationHistoryChart } from "@/components/dashboard/utilization-history-chart";
+import { LiveTelemetryFeed } from "@/components/dashboard/live-telemetry-feed";
 
 export const metadata: Metadata = { title: "Station details" };
 
@@ -196,6 +197,13 @@ async function StationDetailContent({ params, searchParams }: { params: Params; 
             </TableShell>
           </div>
         )}
+      </Panel>
+
+      <Panel
+        title="MongoDB live telemetry feed"
+        note="Real-time electrical streaming feed from MongoDB collection grid_telemetry. Auto-refreshes every 5 seconds with live measurements and statistical window aggregates."
+      >
+        <LiveTelemetryFeed stationId={id} />
       </Panel>
 
       <Panel

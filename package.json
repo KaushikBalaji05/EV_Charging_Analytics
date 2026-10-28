@@ -9,10 +9,16 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "user:create": "tsx --conditions=react-server scripts/create-user.ts"
+    "user:create": "tsx --conditions=react-server scripts/create-user.ts",
+    "telemetry:init": "tsx --conditions=react-server scripts/init-mongo.ts",
+    "simulator:start": "tsx scripts/telemetry-simulator.ts --daemon",
+    "simulator:stop": "tsx scripts/telemetry-simulator.ts --stop",
+    "simulator:status": "tsx scripts/telemetry-simulator.ts --status",
+    "simulator:once": "tsx scripts/telemetry-simulator.ts --once"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
+    "mongodb": "^7.7.0",
     "next": "16.4.3",
     "pg": "^8.23.1",
     "react": "19.3.0",

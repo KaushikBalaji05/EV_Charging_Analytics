@@ -24,6 +24,7 @@ import { EmptyState, ErrorPanel, PageSkeleton } from "@/components/dashboard/sta
 import { TableShell, td, tdRight, th, thRight } from "@/components/dashboard/tables";
 import { TelemetryTrendChart } from "@/components/dashboard/telemetry-trend-chart";
 import { UtilizationHistoryChart } from "@/components/dashboard/utilization-history-chart";
+import { HybridStationView } from "@/components/dashboard/hybrid-station-view";
 
 export const metadata: Metadata = { title: "Station details" };
 
@@ -196,6 +197,13 @@ async function StationDetailContent({ params, searchParams }: { params: Params; 
             </TableShell>
           </div>
         )}
+      </Panel>
+
+      <Panel
+        title="Hybrid data architecture proof of concept"
+        note="Demonstrates multi-source data segregation: Real station metadata from Open Charge Map, simulated electrical telemetry from MongoDB, and macro-grid context from Central Electricity Authority (India)."
+      >
+        <HybridStationView stationId={id} />
       </Panel>
 
       <Panel

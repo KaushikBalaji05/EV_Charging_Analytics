@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getPool, query } from "@/lib/db/pool";
 import { hashPassword } from "@/lib/auth/password";
 import { hashToken } from "@/lib/auth/session";
+import { AUTH } from "@/lib/config";
 import { POST as loginPOST } from "@/app/api/auth/login/route";
 import { POST as logoutPOST } from "@/app/api/auth/logout/route";
 import { GET as meGET } from "@/app/api/auth/me/route";
@@ -61,21 +62,43 @@ async function sessionFor(u: TestUser): Promise<string> {
   return tokenFrom(res);
 }
 
-/** Removes only rows this suite created. Falls back to making them unusable if the trigger cannot be paused. */
+/** Removes only rows this suite created.
+ *
+ * Happy path: plain DELETE works whenever at least one non-test ADMIN exists in the DB.
+ * Fallback: if the last-admin trigger (EV001) fires, we fall back to the DDL disable/enable
+ * pair on a dedicated connection, with ENABLE TRIGGER in a finally block so it always runs.
+ */
 async function cleanup() {
   const client = await getPool().connect();
+  let needsFallback = false;
   try {
     await client.query("BEGIN");
-    await client.query("ALTER TABLE app_user DISABLE TRIGGER trg_protect_last_admin");
     await client.query("DELETE FROM app_user WHERE email LIKE $1", [TEST_EMAIL_LIKE]);
-    await client.query("ALTER TABLE app_user ENABLE TRIGGER trg_protect_last_admin");
     await client.query("COMMIT");
-  } catch {
+    return;
+  } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
-    console.warn("[tests] could not delete test users; making them unusable instead");
-    await client.query("UPDATE app_user SET password_hash = '!' WHERE email LIKE $1", [TEST_EMAIL_LIKE]).catch(() => undefined);
+    needsFallback = (err as { code?: string }).code === "EV001";
+    if (!needsFallback) {
+      console.warn("[tests] could not delete test users; making them unusable instead");
+      await client.query("UPDATE app_user SET password_hash = '!', is_active = false WHERE email LIKE $1", [TEST_EMAIL_LIKE]).catch(() => undefined);
+    }
   } finally {
     client.release();
+  }
+  if (!needsFallback) return;
+
+  // Fallback: test admins are the only admins — must disable the guard temporarily.
+  const c2 = await getPool().connect();
+  try {
+    await c2.query("ALTER TABLE app_user DISABLE TRIGGER trg_protect_last_admin");
+    await c2.query("DELETE FROM app_user WHERE email LIKE $1", [TEST_EMAIL_LIKE]);
+  } catch {
+    console.warn("[tests] could not delete test users; making them unusable instead");
+    await c2.query("UPDATE app_user SET password_hash = '!', is_active = false WHERE email LIKE $1", [TEST_EMAIL_LIKE]).catch(() => undefined);
+  } finally {
+    await c2.query("ALTER TABLE app_user ENABLE TRIGGER trg_protect_last_admin").catch(() => undefined);
+    c2.release();
   }
 }
 
@@ -143,6 +166,10 @@ describe.skipIf(!hasDb)("authentication & authorization (real handlers, real dat
       expect((await login(u)).status).toBe(401); // correct password, but locked
       const [locked] = await query<{ locked: boolean }>(`SELECT locked_until > now() AS locked FROM app_user WHERE user_id = $1`, [u.userId]);
       expect(locked.locked).toBe(true);
+      // F5: counter must stay at the threshold — not reset to 0 — at the moment of lockout.
+      // Before the F1 fix this was 0 (reset on lock), giving attackers a free fresh window after each expiry.
+      const [{ count }] = await query<{ count: number }>(`SELECT failed_login_count AS count FROM app_user WHERE user_id = $1`, [u.userId]);
+      expect(count).toBeGreaterThanOrEqual(AUTH.maxFailedLogins);
 
       await query(`UPDATE app_user SET locked_until = now() - interval '1 minute' WHERE user_id = $1`, [u.userId]); // simulate 15 minutes passing
       expect((await login(u)).status).toBe(200);
@@ -164,6 +191,22 @@ describe.skipIf(!hasDb)("authentication & authorization (real handlers, real dat
       }
       const [{ n }] = await query<{ n: number }>(`SELECT count(*)::int AS n FROM app_user`);
       expect(n).toBeGreaterThan(0);
+    });
+
+    it("returns 413 when the request body exceeds the 10 000-character limit", async () => {
+      // F6: readJson() enforces a MAX_BODY_CHARS cap to prevent memory exhaustion.
+      const res = await loginPOST(
+        new Request(`${ORIGIN}/api/auth/login`, {
+          method: "POST",
+          headers: { host: HOST, "content-type": "application/json" },
+          body: "x".repeat(10_001),
+        }),
+      );
+      expect(res.status).toBe(413);
+      const body = await json(res);
+      expect(body.error.code).toBe("BODY_TOO_LARGE");
+      // Must not leak any internal detail.
+      expect(JSON.stringify(body)).not.toMatch(/select|pg_|stack|at .*\.ts/i);
     });
 
     it("blocks cross-origin login attempts (CSRF)", async () => {

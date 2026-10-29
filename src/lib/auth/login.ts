@@ -53,10 +53,18 @@ export async function authenticate(email: string, password: string): Promise<Log
 
     if (!passwordOk) {
       await client.query(
+        // F1: always increment the counter (never reset to 0 at lockout — that restarted the window for free).
+        // F2: in the non-locking branch clear a stale locked_until that has already expired, so the column
+        //     does not accumulate dead timestamps that could confuse future admin queries.
         `UPDATE app_user
-            SET failed_login_count = CASE WHEN failed_login_count + 1 >= $2 THEN 0 ELSE failed_login_count + 1 END,
-                locked_until       = CASE WHEN failed_login_count + 1 >= $2
-                                          THEN now() + make_interval(mins => $3::int) ELSE locked_until END
+            SET failed_login_count = failed_login_count + 1,
+                locked_until       = CASE
+                                       WHEN failed_login_count + 1 >= $2
+                                         THEN now() + make_interval(mins => $3::int)
+                                       WHEN locked_until > now()
+                                         THEN locked_until
+                                       ELSE NULL
+                                     END
           WHERE user_id = $1`,
         [account.userId, AUTH.maxFailedLogins, AUTH.lockMinutes],
       );

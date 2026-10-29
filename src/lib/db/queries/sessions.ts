@@ -1,7 +1,7 @@
 import "server-only";
 import { query } from "@/lib/db/pool";
 import { dir, likePattern, offsetFor, paged, rangeClause, type Paged } from "@/lib/db/queries/shared";
-import { assertStationExists } from "@/lib/db/queries/stations";
+import { assertChargerExists, assertStationExists } from "@/lib/db/queries/stations";
 import type { SessionSort, SessionStatus, SortOrder } from "@/lib/validation/listing";
 
 export interface SessionRow {
@@ -61,6 +61,8 @@ export interface SessionInput {
 /** Sessions from view v_session_details (migration 004). Search matches registration number, model or station name. */
 export async function listSessions(input: SessionInput): Promise<SessionList> {
   if (input.stationId !== undefined) await assertStationExists(input.stationId);
+  // F7: validate charger_id against the database for consistent 404 feedback (mirrors station_id behaviour).
+  if (input.chargerId !== undefined) await assertChargerExists(input.chargerId);
   const filterParams = [
     input.from ?? null,
     input.to ?? null,

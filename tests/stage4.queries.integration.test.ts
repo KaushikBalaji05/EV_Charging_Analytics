@@ -25,7 +25,9 @@ const sessionBase = { ...base, status: "all", sort: "start" } as const;
 async function deleteMarkedRows() {
   await query(`DELETE FROM charging_session WHERE ev_id IN (SELECT ev_id FROM ev WHERE registration_no LIKE 'ZZTEST-%')`);
   await query(`DELETE FROM ev WHERE registration_no LIKE 'ZZTEST-%'`);
-  await query(`DELETE FROM station_capacity WHERE recorded_at >= '2026-10-22' AND recorded_at < '2026-10-23' AND station_id = 2`);
+  // F4: use a far-future sentinel date (2099-01-01) so the cleanup never overlaps with real
+  // or future sample data (the original 2026-10-22 window was dangerously close to the data).
+  await query(`DELETE FROM station_capacity WHERE recorded_at >= '2099-01-01'`);
 }
 
 describe.skipIf(!hasDb)("Stage 4 queries (sample data)", () => {
@@ -227,8 +229,9 @@ describe.skipIf(!hasDb)("Stage 4 queries (sample data)", () => {
     describe("with an extra 120% overload and no telemetry nearby (temporary row)", () => {
       beforeAll(async () => {
         // The capacity trigger computes utilization_pct = 120 and overload_status = OVERLOADED from the loads.
+        // Sentinel date 2099-01-01 is used so deleteMarkedRows() never overlaps with real sample data.
         await query(`INSERT INTO station_capacity (station_id, recorded_at, max_load_kw, current_load_kw, utilization_pct, overload_status)
-                     VALUES (2, '2026-10-22 08:00', 150, 180, 1, 'NORMAL')`);
+                     VALUES (2, '2099-01-01 08:00', 150, 180, 1, 'NORMAL')`);
       });
       afterAll(deleteMarkedRows);
 

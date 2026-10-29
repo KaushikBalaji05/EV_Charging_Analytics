@@ -103,6 +103,23 @@ describe.skipIf(!hasDb)("Stage 4 API (real handlers, real database)", () => {
     });
   });
 
+  describe("sessions charger_id filter", () => {
+    it("returns 404 for an unknown charger_id (F7: consistent with station_id behaviour)", async () => {
+      expect((await sessionsList(req("/api/sessions?charger_id=9999", { cookie: token }))).status).toBe(404);
+    });
+    it("returns 400 for a non-integer or out-of-range charger_id", async () => {
+      expect((await sessionsList(req("/api/sessions?charger_id=abc", { cookie: token }))).status).toBe(400);
+      expect((await sessionsList(req("/api/sessions?charger_id=0", { cookie: token }))).status).toBe(400);
+      expect((await sessionsList(req("/api/sessions?charger_id=-1", { cookie: token }))).status).toBe(400);
+    });
+    it("returns 200 with matching sessions for a valid charger_id", async () => {
+      const res = await sessionsList(req("/api/sessions?charger_id=1", { cookie: token }));
+      expect(res.status).toBe(200);
+      const { data } = await body(res);
+      expect(Array.isArray(data.rows)).toBe(true);
+    });
+  });
+
   describe("allowlists and bounds", () => {
     it("rejects sort/metric values outside the allowlist, including injection attempts", async () => {
       for (const q of ["sort=password_hash", "sort=energy;DROP TABLE ev", "sort=1 OR 1=1", "order=sideways", "status=hacked", "page=0", "page=-2", "page=abc", "page_size=0", "page_size=101", "page_size=1000"]) {

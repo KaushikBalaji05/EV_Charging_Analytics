@@ -137,13 +137,15 @@ export async function initMongoTelemetry(): Promise<{ ok: boolean; message: stri
   if (collections.length === 0) {
     await db.createCollection(TELEMETRY_COLLECTION, {
       validator,
-      validationAction: "warn",
+      validationAction: "error",
+      validationLevel: "strict",
     });
   } else {
     await db.command({
       collMod: TELEMETRY_COLLECTION,
       validator,
-      validationAction: "warn",
+      validationAction: "error",
+      validationLevel: "strict",
     });
   }
 

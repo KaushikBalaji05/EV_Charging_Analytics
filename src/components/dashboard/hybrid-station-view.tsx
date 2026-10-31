@@ -111,6 +111,19 @@ function LiveTooltip({ active, payload }: TooltipContentProps) {
   );
 }
 
+function ScopeDisclaimer() {
+  return (
+    <div className="rounded border border-rule bg-paper/60 p-3 text-xs text-ink">
+      <p className="font-semibold text-ink">Analytical Model vs. Physical Hardware Scope</p>
+      <p className="mt-1 text-muted leading-relaxed">
+        <strong>Physical Metadata (OCM):</strong> Verified physical charger ratings (~3 kW / 6 kW) from mapped Bengaluru public Open Charge Map records.
+        {" "}·{" "}
+        <strong>Analytical & Simulation Model:</strong> The 100 kW / 150 kW station capacities belong to the project&apos;s analytical multi-bay charging-hub model. High-frequency electrical telemetry in MongoDB is synthetically simulated to demonstrate grid dynamics and is not measured from the physical OCM chargers.
+      </p>
+    </div>
+  );
+}
+
 export function HybridStationView({
   stationId,
   refreshIntervalMs = 5000,
@@ -181,30 +194,6 @@ export function HybridStationView({
     };
   }, [stationId, autoRefresh, refreshIntervalMs]);
 
-  if (loading && !data) {
-    return (
-      <div className="space-y-4">
-        <div className="h-28 animate-pulse rounded border border-rule bg-rule/20" />
-        <div className="h-64 animate-pulse rounded border border-rule bg-rule/20" />
-      </div>
-    );
-  }
-
-  if (error && !data) {
-    return (
-      <div className="rounded border border-overload/30 bg-overload-soft p-4 text-sm text-ink">
-        <p className="font-medium text-overload">Unable to load hybrid station summary</p>
-        <p className="mt-1 text-muted">{error}</p>
-        <button
-          onClick={fetchSummary}
-          className="mt-3 rounded border border-rule bg-panel px-3 py-1 text-xs font-medium hover:bg-paper"
-        >
-          Retry Connection
-        </button>
-      </div>
-    );
-  }
-
   const ocm = data?.externalMetadata;
   const live = data?.liveTelemetry;
   const latest = live?.latest;
@@ -215,8 +204,28 @@ export function HybridStationView({
 
   return (
     <div className="space-y-6">
-      {/* CARD 1: Real External Station Metadata (Open Charge Map) */}
-      <div className="rounded border border-rule bg-panel p-4">
+      <ScopeDisclaimer />
+
+      {loading && !data ? (
+        <div className="space-y-4">
+          <div className="h-28 animate-pulse rounded border border-rule bg-rule/20" />
+          <div className="h-64 animate-pulse rounded border border-rule bg-rule/20" />
+        </div>
+      ) : error && !data ? (
+        <div className="rounded border border-overload/30 bg-overload-soft p-4 text-sm text-ink">
+          <p className="font-medium text-overload">Unable to load hybrid station summary</p>
+          <p className="mt-1 text-muted">{error}</p>
+          <button
+            onClick={fetchSummary}
+            className="mt-3 rounded border border-rule bg-panel px-3 py-1 text-xs font-medium hover:bg-paper"
+          >
+            Retry Connection
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* CARD 1: Real External Station Metadata (Open Charge Map) */}
+          <div className="rounded border border-rule bg-panel p-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rule/70 pb-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center rounded bg-[#1d4f91]/10 px-2.5 py-0.5 text-xs font-semibold text-[#1d4f91]">
@@ -460,6 +469,8 @@ export function HybridStationView({
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

@@ -80,13 +80,16 @@ export async function getStationLiveTelemetryWithAggregates(
   const latest: MongoGridTelemetry | null = history.length > 0 ? history[history.length - 1] : null;
   const rawStats = pipelineResult?.aggregates?.[0];
 
+  const roundOrNull = (val: unknown, decimals: number): number | null =>
+    typeof val === "number" && !Number.isNaN(val) ? Number(val.toFixed(decimals)) : null;
+
   const stats = {
-    avgVoltage: rawStats?.avgVoltage ? Number(rawStats.avgVoltage.toFixed(1)) : null,
-    avgFrequency: rawStats?.avgFrequency ? Number(rawStats.avgFrequency.toFixed(3)) : null,
-    avgPowerKw: rawStats?.avgPowerKw ? Number(rawStats.avgPowerKw.toFixed(1)) : null,
-    maxPowerKw: rawStats?.maxPowerKw ? Number(rawStats.maxPowerKw.toFixed(1)) : null,
-    avgGridLoadKw: rawStats?.avgGridLoadKw ? Number(rawStats.avgGridLoadKw.toFixed(1)) : null,
-    maxGridLoadKw: rawStats?.maxGridLoadKw ? Number(rawStats.maxGridLoadKw.toFixed(1)) : null,
+    avgVoltage: roundOrNull(rawStats?.avgVoltage, 1),
+    avgFrequency: roundOrNull(rawStats?.avgFrequency, 3),
+    avgPowerKw: roundOrNull(rawStats?.avgPowerKw, 1),
+    maxPowerKw: roundOrNull(rawStats?.maxPowerKw, 1),
+    avgGridLoadKw: roundOrNull(rawStats?.avgGridLoadKw, 1),
+    maxGridLoadKw: roundOrNull(rawStats?.maxGridLoadKw, 1),
     sampleCount: rawStats?.sampleCount ?? 0,
   };
 

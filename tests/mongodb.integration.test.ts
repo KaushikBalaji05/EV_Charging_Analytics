@@ -67,6 +67,54 @@ describe("MongoDB Live Telemetry Integration Tests (Hybrid Branch)", () => {
     expect(indexNames).toContain("idx_source");
   });
 
+  it("strictly enforces JSON schema validation with validationAction error", async () => {
+    if (!mongoAvailable) return;
+    const db = await getMongoDb();
+    const collection = db.collection(TELEMETRY_COLLECTION);
+
+    // Should reject non-simulated source
+    await expect(
+      collection.insertOne({
+        station_id: TEST_STATION_ID,
+        recorded_at: new Date(),
+        voltage_v: 415,
+        current_a: 50,
+        power_kw: 30,
+        frequency_hz: 50,
+        grid_load_kw: 60,
+        source: "real_hardware",
+      }),
+    ).rejects.toThrow(/validation/i);
+
+    // Should reject negative voltage
+    await expect(
+      collection.insertOne({
+        station_id: TEST_STATION_ID,
+        recorded_at: new Date(),
+        voltage_v: -10,
+        current_a: 50,
+        power_kw: 30,
+        frequency_hz: 50,
+        grid_load_kw: 60,
+        source: "simulated",
+      }),
+    ).rejects.toThrow(/validation/i);
+
+    // Should reject string station_id
+    await expect(
+      collection.insertOne({
+        station_id: "not-an-int",
+        recorded_at: new Date(),
+        voltage_v: 415,
+        current_a: 50,
+        power_kw: 30,
+        frequency_hz: 50,
+        grid_load_kw: 60,
+        source: "simulated",
+      }),
+    ).rejects.toThrow(/validation/i);
+  });
+
   it("inserts telemetry batches into MongoDB with UTC BSON dates and simulated source", async () => {
     if (!mongoAvailable) return;
     const sampleReadings: MongoGridTelemetry[] = [
@@ -115,5 +163,38 @@ describe("MongoDB Live Telemetry Integration Tests (Hybrid Branch)", () => {
     expect(res.stats.avgVoltage).toBeGreaterThan(400);
     expect(res.stats.avgFrequency).toBeGreaterThan(49.0);
     expect(res.stats.maxGridLoadKw).toBeGreaterThanOrEqual(110.5);
+  });
+
+  it("preserves legitimate numeric zero values in telemetry statistics", async () => {
+    if (!mongoAvailable) return;
+    const ZERO_STATION_ID = 998;
+    const db = await getMongoDb();
+    try {
+      await db.collection(TELEMETRY_COLLECTION).deleteMany({ station_id: ZERO_STATION_ID });
+
+      // Insert idle station reading where power_kw and grid_load_kw are strictly 0
+      await insertTelemetryBatch([
+        {
+          station_id: ZERO_STATION_ID,
+          recorded_at: new Date(),
+          voltage_v: 415.0,
+          current_a: 0.0,
+          power_kw: 0.0,
+          frequency_hz: 50.0,
+          grid_load_kw: 0.0,
+          source: "simulated",
+        },
+      ]);
+
+      const res = await getStationLiveTelemetryWithAggregates(ZERO_STATION_ID, 10);
+      expect(res.stats.sampleCount).toBe(1);
+      expect(res.stats.avgPowerKw).toBe(0);
+      expect(res.stats.maxPowerKw).toBe(0);
+      expect(res.stats.avgGridLoadKw).toBe(0);
+      expect(res.stats.maxGridLoadKw).toBe(0);
+      expect(res.stats.avgVoltage).toBe(415.0);
+    } finally {
+      await db.collection(TELEMETRY_COLLECTION).deleteMany({ station_id: ZERO_STATION_ID });
+    }
   });
 });

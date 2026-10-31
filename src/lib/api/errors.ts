@@ -21,10 +21,22 @@ const CONNECTION_CODES = new Set([
 ]);
 
 export function isDatabaseUnavailable(err: unknown): boolean {
+  if (!err) return false;
+  const name = (err as Error)?.name ?? "";
+  if (
+    /Mongo(ServerSelection|Network|Timeout|TopologyClosed|NotConnected)Error/i.test(name) ||
+    name === "MongoError"
+  ) {
+    return true;
+  }
   const code = (err as { code?: string })?.code;
   if (code && (CONNECTION_CODES.has(code) || code.startsWith("08"))) return true;
+
+  const causeCode = (err as { cause?: { code?: string } })?.cause?.code;
+  if (causeCode && CONNECTION_CODES.has(causeCode)) return true;
+
   const msg = (err as Error)?.message ?? "";
-  return /timeout exceeded when trying to connect|Connection terminated/i.test(msg);
+  return /timeout exceeded when trying to connect|Connection terminated|Server selection timed out|topology is closed/i.test(msg);
 }
 
 export interface PublicError {

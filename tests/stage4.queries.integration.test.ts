@@ -340,5 +340,43 @@ describe.skipIf(!hasDb)("Stage 4 queries (sample data)", () => {
         expect(day).toMatchObject({ date: "2026-10-21", sessions: 1, energyKwh: 5 });
       });
     });
+
+    describe("station capacity trigger guard (migration 005)", () => {
+      it("safely rejects max_load_kw = 0 without division by zero", async () => {
+        await expect(
+          query(
+            `INSERT INTO station_capacity (station_id, recorded_at, max_load_kw, current_load_kw, utilization_pct, overload_status)
+             VALUES (1, '2099-01-01 12:00:00', 0, 50, 0, 'NORMAL')`,
+          ),
+        ).rejects.toThrow(/max_load_kw must be strictly positive/i);
+      });
+
+      it("safely rejects negative max_load_kw", async () => {
+        await expect(
+          query(
+            `INSERT INTO station_capacity (station_id, recorded_at, max_load_kw, current_load_kw, utilization_pct, overload_status)
+             VALUES (1, '2099-01-01 12:00:00', -10, 50, 0, 'NORMAL')`,
+          ),
+        ).rejects.toThrow(/max_load_kw must be strictly positive/i);
+      });
+
+      it("computes utilization and overload status correctly for valid loads", async () => {
+        const [normal] = await query<{ util: number; status: string }>(
+          `INSERT INTO station_capacity (station_id, recorded_at, max_load_kw, current_load_kw, utilization_pct, overload_status)
+           VALUES (1, '2099-01-01 13:00:00', 100, 75, 0, 'NORMAL')
+           RETURNING utilization_pct AS util, overload_status AS status`,
+        );
+        expect(Number(normal.util)).toBe(75);
+        expect(normal.status).toBe("NORMAL");
+
+        const [overloaded] = await query<{ util: number; status: string }>(
+          `INSERT INTO station_capacity (station_id, recorded_at, max_load_kw, current_load_kw, utilization_pct, overload_status)
+           VALUES (1, '2099-01-01 14:00:00', 100, 125.5, 0, 'NORMAL')
+           RETURNING utilization_pct AS util, overload_status AS status`,
+        );
+        expect(Number(overloaded.util)).toBe(125.5);
+        expect(overloaded.status).toBe("OVERLOADED");
+      });
+    });
   });
 });

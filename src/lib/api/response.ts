@@ -6,17 +6,23 @@ import { assertSameOrigin, isSafeMethod } from "@/lib/auth/csrf";
 import { requireApiUser } from "@/lib/auth/dal";
 import type { Role, SessionUser } from "@/lib/auth/constants";
 
+export type ApiDataSource = "postgresql" | "mongodb" | "hybrid";
+
 /** Every successful response has this shape: { ok: true, data, meta }. */
 export interface ApiMeta {
-  source: "postgresql";
+  source: ApiDataSource;
   dataMode: "demo" | "production";
   generatedAt: string; // ISO-8601 UTC; when the server produced this response
 }
 
-export function ok<T>(data: T, init?: ResponseInit): Response {
+export function ok<T>(
+  data: T,
+  init?: ResponseInit,
+  metaOptions?: { source?: ApiDataSource; dataMode?: "demo" | "production" },
+): Response {
   const meta: ApiMeta = {
-    source: "postgresql",
-    dataMode: getEnv().DATA_MODE,
+    source: metaOptions?.source ?? "postgresql",
+    dataMode: metaOptions?.dataMode ?? getEnv().DATA_MODE,
     generatedAt: new Date().toISOString(),
   };
   return Response.json({ ok: true, data, meta }, init);

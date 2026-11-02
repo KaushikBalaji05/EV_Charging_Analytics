@@ -53,7 +53,7 @@ export async function authenticate(email: string, password: string): Promise<Log
 
     if (!passwordOk) {
       await client.query(
-        // F1: always increment the counter (never reset to 0 at lockout ??? that restarted the window for free).
+        // F1: always increment the counter (never reset to 0 at lockout — that restarted the window for free).
         // F2: in the non-locking branch clear a stale locked_until that has already expired, so the column
         //     does not accumulate dead timestamps that could confuse future admin queries.
         `UPDATE app_user

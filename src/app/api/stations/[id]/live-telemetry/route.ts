@@ -13,7 +13,7 @@ const LiveQuerySchema = z.object({
 
 /**
  * GET /api/stations/[id]/live-telemetry?limit=30  (Analyst+)
- * Retrieves live MongoDB telemetry feed and real-time aggregated metrics for a station.
+ * Retrieves simulated live MongoDB telemetry feed and real-time aggregated metrics for a station.
  * Confirms station existence in PostgreSQL (returns 404 if not found).
  */
 export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -26,10 +26,14 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
 
     const result = await getStationLiveTelemetryWithAggregates(id, limit);
 
-    return ok({
-      ...result,
-      source: "simulated",
-      count: result.history.length,
-    });
+    return ok(
+      {
+        ...result,
+        source: "simulated",
+        count: result.history.length,
+      },
+      undefined,
+      { source: "mongodb" },
+    );
   });
 }

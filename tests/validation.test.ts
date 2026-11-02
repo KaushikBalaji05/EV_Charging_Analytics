@@ -50,6 +50,30 @@ describe("error sanitising", () => {
     expect(p.status).toBe(503);
     expect(JSON.stringify(p)).not.toContain("10.0.0.5");
   });
+  it("maps MongoDB unavailability errors to 503 without leaking connection info", () => {
+    const mongoErr = Object.assign(
+      new Error("Server selection timed out after 5000 ms at mongodb://db-admin:secret@127.0.0.1:27017"),
+      { name: "MongoServerSelectionError" },
+    );
+    const p = toPublicError(mongoErr);
+    expect(p.status).toBe(503);
+    expect(p.code).toBe("DATABASE_UNAVAILABLE");
+    expect(JSON.stringify(p)).not.toMatch(/mongodb|secret|127\.0\.0\.1|27017/i);
+
+    const netErr = Object.assign(
+      new Error("connect ECONNREFUSED 127.0.0.1:27017"),
+      { name: "MongoNetworkError", cause: { code: "ECONNREFUSED" } },
+    );
+    const pNet = toPublicError(netErr);
+    expect(pNet.status).toBe(503);
+    expect(pNet.code).toBe("DATABASE_UNAVAILABLE");
+  });
+  it("keeps unexpected programming errors as HTTP 500", () => {
+    const typeErr = new TypeError("Cannot read properties of undefined (reading 'station_id')");
+    const p = toPublicError(typeErr);
+    expect(p.status).toBe(500);
+    expect(p.code).toBe("INTERNAL_ERROR");
+  });
   it("never leaks SQL or internals from unknown errors", () => {
     const p = toPublicError(new Error('relation "secret_table" does not exist at SELECT * FROM secret_table'));
     expect(p.status).toBe(500);

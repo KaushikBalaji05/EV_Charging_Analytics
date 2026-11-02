@@ -88,7 +88,7 @@ async function cleanup() {
   }
   if (!needsFallback) return;
 
-  // Fallback: test admins are the only admins ??? must disable the guard temporarily.
+  // Fallback: test admins are the only admins — must disable the guard temporarily.
   const c2 = await getPool().connect();
   try {
     await c2.query("ALTER TABLE app_user DISABLE TRIGGER trg_protect_last_admin");
@@ -166,7 +166,7 @@ describe.skipIf(!hasDb)("authentication & authorization (real handlers, real dat
       expect((await login(u)).status).toBe(401); // correct password, but locked
       const [locked] = await query<{ locked: boolean }>(`SELECT locked_until > now() AS locked FROM app_user WHERE user_id = $1`, [u.userId]);
       expect(locked.locked).toBe(true);
-      // F5: counter must stay at the threshold ??? not reset to 0 ??? at the moment of lockout.
+      // F5: counter must stay at the threshold — not reset to 0 — at the moment of lockout.
       // Before the F1 fix this was 0 (reset on lock), giving attackers a free fresh window after each expiry.
       const [{ count }] = await query<{ count: number }>(`SELECT failed_login_count AS count FROM app_user WHERE user_id = $1`, [u.userId]);
       expect(count).toBeGreaterThanOrEqual(AUTH.maxFailedLogins);

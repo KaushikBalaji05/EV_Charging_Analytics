@@ -65,17 +65,20 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
       telemetryRes.status === "fulfilled" ? telemetryRes.value : DEFAULT_UNAVAILABLE_TELEMETRY;
     const regionalGrid = gridRes.status === "fulfilled" ? gridRes.value : null;
 
-    return ok({
-      localStationId: id,
-      externalMetadata,
-      liveTelemetry,
-      regionalGrid,
-      sourceSummary: {
-        metadataSource: externalMetadata?.externalSource ?? "open_charge_map_curated",
-        telemetrySource: "simulated",
-        telemetryStatus: liveTelemetry.status,
-        gridContextSource: "central_electricity_authority",
+    return ok(
+      {
+        localStationId: id,
+        externalMetadata,
+        liveTelemetry,
+        regionalGrid,
+        sourceSummary: {
+          metadataSource: externalMetadata?.externalSource ?? "open_charge_map_curated",
+          telemetrySource: "simulated",
+          gridContextSource: "central_electricity_authority",
+        },
       },
-    });
+      undefined,
+      { source: "hybrid" },
+    );
   });
 }

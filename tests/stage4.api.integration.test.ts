@@ -14,6 +14,8 @@ import { GET as stationCapacity } from "@/app/api/stations/[id]/capacity/route";
 import { GET as stationOverloads } from "@/app/api/stations/[id]/overloads/route";
 import { GET as overloadsList } from "@/app/api/overloads/route";
 import { GET as sessionsList } from "@/app/api/sessions/route";
+import { GET as liveTelemetry } from "@/app/api/stations/[id]/live-telemetry/route";
+import { GET as hybridSummary } from "@/app/api/stations/[id]/hybrid-summary/route";
 import { cleanupTestUsers, makeTestUser, req, sessionTokenFor } from "./helpers/users";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
@@ -188,6 +190,24 @@ describe.skipIf(!hasDb)("Stage 4 API (real handlers, real database)", () => {
       expect(hourly[11]).toMatchObject({ hour: 11, energyKwh: 22, sessions: 1 });
       const daily = (await body(await demandDaily(req("/api/demand/daily?from=2026-10-19&to=2026-10-21", { cookie: token })))).data;
       expect(daily.points.map((p: { energyKwh: number }) => p.energyKwh)).toEqual([0, 75, 0]);
+    });
+    it("reports correct API metadata provenance (postgresql, mongodb, hybrid)", async () => {
+      // PostgreSQL endpoint
+      const pgRes = await body(await stationDetail(req("/api/stations/1", { cookie: token }), ctx("1")));
+      expect(pgRes.meta.source).toBe("postgresql");
+
+      // MongoDB endpoint
+      const mongoRes = await body(await liveTelemetry(req("/api/stations/1/live-telemetry", { cookie: token }), ctx("1")));
+      expect(mongoRes.meta.source).toBe("mongodb");
+
+      // Hybrid endpoint
+      const hybridRes = await body(await hybridSummary(req("/api/stations/1/hybrid-summary", { cookie: token }), ctx("1")));
+      expect(hybridRes.meta.source).toBe("hybrid");
+      expect(hybridRes.data.sourceSummary).toEqual({
+        metadataSource: "open_charge_map_curated",
+        telemetrySource: "simulated",
+        gridContextSource: "central_electricity_authority",
+      });
     });
   });
 });

@@ -12,7 +12,7 @@ const NAV: NavItem[] = [
   { href: "/overloads", label: "Overload explorer", ready: true },
   { href: "/sessions", label: "Charging sessions", ready: true },
   { href: "/admin/users", label: "User management", ready: true, adminOnly: true },
-  { href: "/admin", label: "Data administration", ready: false, adminOnly: true },
+  { href: "/data-administration", label: "Data administration", ready: true, adminOnly: true },
 ];
 
 const publicItems = NAV.filter((i) => !i.adminOnly);

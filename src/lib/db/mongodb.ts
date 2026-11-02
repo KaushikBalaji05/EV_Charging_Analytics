@@ -51,10 +51,17 @@ export async function getMongoClient(): Promise<MongoClient> {
       serverSelectionTimeoutMS: 5000,
       connectTimeoutMS: 5000,
     });
-    globalForMongo.__mongoClientPromise = client.connect().then((connectedClient) => {
-      globalForMongo.__mongoClient = connectedClient;
-      return connectedClient;
-    });
+    globalForMongo.__mongoClientPromise = client
+      .connect()
+      .then((connectedClient) => {
+        globalForMongo.__mongoClient = connectedClient;
+        return connectedClient;
+      })
+      .catch((err) => {
+        // Reset promise on connection failure so subsequent requests can retry
+        globalForMongo.__mongoClientPromise = undefined;
+        throw err;
+      });
   }
 
   return globalForMongo.__mongoClientPromise;
@@ -65,6 +72,17 @@ export async function getMongoDb(): Promise<Db> {
   const config = getMongoConfig();
   const client = await getMongoClient();
   return client.db(config.dbName);
+}
+
+/** Check if MongoDB is reachable with a short timeout without throwing unhandled exceptions */
+export async function isMongoAvailable(timeoutMs = 2000): Promise<boolean> {
+  try {
+    const client = await getMongoClient();
+    await client.db("admin").command({ ping: 1 }, { timeoutMS: timeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

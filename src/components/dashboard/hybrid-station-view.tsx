@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -67,12 +67,21 @@ interface RegionalGridContext {
   reportingPeriod: string;
   disclaimer: string;
   attribution: string;
+  dataQuality?: "live" | "partial" | "benchmark";
+  isNationalLive?: boolean;
+  isStateLive?: boolean;
 }
+
+export type TelemetryFreshnessStatus = "live" | "stale" | "missing" | "unavailable";
 
 interface HybridSummaryData {
   localStationId: number;
   externalMetadata: ExternalStationMetadata | null;
   liveTelemetry: {
+    status: TelemetryFreshnessStatus;
+    isLive: boolean;
+    ageSeconds: number | null;
+    error?: string;
     latest: TelemetryPoint | null;
     history: TelemetryPoint[];
     stats: {
@@ -89,8 +98,21 @@ interface HybridSummaryData {
   sourceSummary: {
     metadataSource: string;
     telemetrySource: string;
+    telemetryStatus?: TelemetryFreshnessStatus;
     gridContextSource: string;
   };
+}
+
+function formatAge(seconds: number | null): string {
+  if (seconds === null) return "";
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function LiveTooltip({ active, payload }: TooltipContentProps) {
@@ -135,11 +157,17 @@ export function HybridStationView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchSummary = useCallback(async () => {
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const res = await fetch(`/api/stations/${stationId}/hybrid-summary?limit=30`, {
         cache: "no-store",
+        signal: controller.signal,
       });
       const json = await res.json();
       if (!res.ok || !json.ok) {
@@ -148,6 +176,7 @@ export function HybridStationView({
       setData(json.data);
       setError(null);
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "Failed to load hybrid summary");
     } finally {
       setLoading(false);
@@ -155,42 +184,48 @@ export function HybridStationView({
   }, [stationId]);
 
   useEffect(() => {
-    let cancelled = false;
+    let active = true;
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     const load = async () => {
       try {
         const res = await fetch(`/api/stations/${stationId}/hybrid-summary?limit=30`, {
           cache: "no-store",
+          signal: controller.signal,
         });
         const json = await res.json();
-        if (cancelled) return;
+        if (!active) return;
         if (!res.ok || !json.ok) {
           throw new Error(json.error?.message || `HTTP ${res.status}`);
         }
         setData(json.data);
         setError(null);
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load hybrid summary");
-        }
+        if (!active || (err instanceof Error && err.name === "AbortError")) return;
+        setError(err instanceof Error ? err.message : "Failed to load hybrid summary");
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     };
 
-    const promise = Promise.resolve().then(load);
+    void load();
+
     if (!autoRefresh) {
       return () => {
-        cancelled = true;
-        void promise;
+        active = false;
+        controller.abort();
       };
     }
-    const timer = setInterval(() => { void load(); }, refreshIntervalMs);
+
+    const timer = setInterval(() => {
+      void load();
+    }, refreshIntervalMs);
+
     return () => {
-      cancelled = true;
+      active = false;
+      controller.abort();
       clearInterval(timer);
-      void promise;
     };
   }, [stationId, autoRefresh, refreshIntervalMs]);
 
@@ -201,6 +236,11 @@ export function HybridStationView({
   const stats = live?.stats;
   const cea = data?.regionalGrid;
   const isOverloaded = latest?.metadata?.is_overloaded;
+
+  const telemetryStatus: TelemetryFreshnessStatus =
+    live?.status ?? (history.length > 0 ? "stale" : "missing");
+  const isLiveStreaming = telemetryStatus === "live";
+  const ageLabel = formatAge(live?.ageSeconds ?? null);
 
   return (
     <div className="space-y-6">
@@ -296,21 +336,53 @@ export function HybridStationView({
         )}
       </div>
 
-      {/* CARD 2: Simulated Live Electrical Telemetry (MongoDB) */}
+      {/* CARD 2: Simulated Live / Stale Electrical Telemetry (MongoDB) */}
       <div className="rounded border border-rule bg-panel p-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rule/70 pb-3">
           <div className="flex items-center gap-2">
-            <span className="relative flex h-2.5 w-2.5">
-              {autoRefresh && (
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-charge opacity-75" />
-              )}
+            {/* Live streaming status indicator */}
+            {isLiveStreaming ? (
+              <span className="relative flex h-2.5 w-2.5">
+                {autoRefresh && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-charge opacity-75" />
+                )}
+                <span
+                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${autoRefresh ? "bg-charge" : "bg-muted"}`}
+                />
+              </span>
+            ) : (
               <span
-                className={`relative inline-flex h-2.5 w-2.5 rounded-full ${autoRefresh ? "bg-charge" : "bg-muted"}`}
+                className={`inline-flex h-2.5 w-2.5 rounded-full ${
+                  telemetryStatus === "stale"
+                    ? "bg-amber-500"
+                    : telemetryStatus === "unavailable"
+                      ? "bg-overload"
+                      : "bg-muted"
+                }`}
               />
-            </span>
-            <span className="inline-flex items-center rounded bg-charge/10 px-2.5 py-0.5 text-xs font-semibold text-charge">
-              Live electrical telemetry: Simulated
-            </span>
+            )}
+
+            {telemetryStatus === "live" && (
+              <span className="inline-flex items-center rounded bg-charge/10 px-2.5 py-0.5 text-xs font-semibold text-charge">
+                Live electrical telemetry: Active stream {ageLabel ? `(${ageLabel})` : ""}
+              </span>
+            )}
+            {telemetryStatus === "stale" && (
+              <span className="inline-flex items-center rounded bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                Stored telemetry: Stale reading {ageLabel ? `(${ageLabel})` : ""}
+              </span>
+            )}
+            {telemetryStatus === "missing" && (
+              <span className="inline-flex items-center rounded bg-muted/10 px-2.5 py-0.5 text-xs font-semibold text-muted">
+                Telemetry: No readings recorded
+              </span>
+            )}
+            {telemetryStatus === "unavailable" && (
+              <span className="inline-flex items-center rounded bg-overload/10 px-2.5 py-0.5 text-xs font-semibold text-overload">
+                Telemetry: Source unavailable
+              </span>
+            )}
+
             <span className="rounded bg-paper px-2 py-0.5 text-xs text-muted">
               MongoDB: grid_telemetry
             </span>
@@ -334,7 +406,28 @@ export function HybridStationView({
           </div>
         </div>
 
-        {history.length === 0 ? (
+        {/* Unavailable state notice */}
+        {telemetryStatus === "unavailable" && (
+          <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-4 text-xs text-ink">
+            <p className="font-semibold text-amber-800">Telemetry Database Temporarily Unreachable</p>
+            <p className="mt-1 text-muted">
+              {live?.error || "Unable to reach MongoDB grid_telemetry."} PostgreSQL relational billing analytics and Open Charge Map hardware specifications remain active.
+            </p>
+          </div>
+        )}
+
+        {/* Stale data warning indicator */}
+        {telemetryStatus === "stale" && history.length > 0 && (
+          <div className="mt-3 flex items-center justify-between rounded border border-amber-200 bg-amber-50/60 px-3 py-1.5 text-xs text-amber-800">
+            <span>
+              ⚠️ Telemetry simulator is stopped or paused. Showing previous readings from {ageLabel}.
+            </span>
+            <code className="text-[11px] font-mono text-muted">npm run simulator:start</code>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {history.length === 0 && telemetryStatus !== "unavailable" ? (
           <div className="flex flex-col items-center justify-center py-10 text-center">
             <p className="text-sm font-medium">No live telemetry readings recorded yet in MongoDB</p>
             <p className="mt-1 max-w-sm text-xs text-muted">
@@ -344,14 +437,16 @@ export function HybridStationView({
               npm run simulator:start
             </code>
           </div>
-        ) : (
+        ) : history.length > 0 ? (
           <div className="mt-4 space-y-4">
             {/* Live Electrical Strips */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded border border-rule bg-paper/60 p-3">
                 <span className="text-xs text-muted">EV Charging Power</span>
                 <p className="text-lg font-semibold text-ink">{latest ? formatKw(latest.power_kw) : "—"}</p>
-                <span className="text-[11px] text-muted">Instant draw</span>
+                <span className="text-[11px] text-muted">
+                  {isLiveStreaming ? "Instant draw" : `Draw at ${latest ? formatShortTimestamp(latest.recorded_at.toString()) : ""}`}
+                </span>
               </div>
               <div className={`rounded border p-3 ${isOverloaded ? "border-overload bg-overload-soft" : "border-rule bg-paper/60"}`}>
                 <span className="text-xs text-muted">Transformer Load</span>
@@ -377,7 +472,7 @@ export function HybridStationView({
             </div>
 
             {/* Live Chart */}
-            <div className="h-60 w-full" role="img" aria-label="Live electrical telemetry line chart">
+            <div className="h-60 w-full" role="img" aria-label="Electrical telemetry line chart">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={history} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
                   <CartesianGrid vertical={false} stroke="#d5dedb" />
@@ -437,16 +532,31 @@ export function HybridStationView({
               </div>
             )}
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* CARD 3: Regional Grid Context (Central Electricity Authority) */}
       {cea && (
         <div className="rounded border border-rule bg-panel p-4">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rule/70 pb-3">
-            <span className="inline-flex items-center rounded bg-amber-700/10 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
-              Regional context: Central Electricity Authority (India)
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded bg-amber-700/10 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
+                Regional context: Central Electricity Authority (India)
+              </span>
+              {cea.dataQuality === "live" ? (
+                <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                  Live Feed
+                </span>
+              ) : cea.dataQuality === "partial" ? (
+                <span className="rounded bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700">
+                  Partial Live Feed
+                </span>
+              ) : (
+                <span className="rounded bg-paper px-2 py-0.5 text-xs font-medium text-muted">
+                  Verified Benchmark
+                </span>
+              )}
+            </div>
             <span className="text-xs text-muted">
               {cea.attribution} · {cea.reportingPeriod}
             </span>

@@ -4,6 +4,7 @@ import {
   closeMongoConnection,
   getMongoDb,
   initMongoTelemetry,
+  isMongoAvailable,
   MongoGridTelemetry,
   TELEMETRY_COLLECTION,
 } from "../src/lib/db/mongodb";
@@ -15,6 +16,8 @@ import {
 
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017";
 const TEST_STATION_ID = 999;
+const STALE_TEST_STATION_ID = 998;
+const EMPTY_TEST_STATION_ID = 997;
 
 let mongoAvailable = false;
 
@@ -34,7 +37,9 @@ afterAll(async () => {
   if (mongoAvailable) {
     try {
       const db = await getMongoDb();
-      await db.collection(TELEMETRY_COLLECTION).deleteMany({ station_id: TEST_STATION_ID });
+      await db
+        .collection(TELEMETRY_COLLECTION)
+        .deleteMany({ station_id: { $in: [TEST_STATION_ID, STALE_TEST_STATION_ID] } });
     } catch {
       // Ignore
     }
@@ -51,6 +56,12 @@ describe("MongoDB Live Telemetry Integration Tests (Hybrid Branch)", () => {
     const db = await getMongoDb();
     const result = await db.command({ ping: 1 });
     expect(result.ok).toBe(1);
+  });
+
+  it("checks database availability using isMongoAvailable helper", async () => {
+    if (!mongoAvailable) return;
+    const ok = await isMongoAvailable(2000);
+    expect(ok).toBe(true);
   });
 
   it("initializes collection with indexes and schema validator", async () => {
@@ -120,7 +131,7 @@ describe("MongoDB Live Telemetry Integration Tests (Hybrid Branch)", () => {
     const sampleReadings: MongoGridTelemetry[] = [
       {
         station_id: TEST_STATION_ID,
-        recorded_at: new Date(Date.now() - 10000),
+        recorded_at: new Date(Date.now() - 5000), // 5 seconds ago (live)
         voltage_v: 414.2,
         current_a: 85.0,
         power_kw: 57.5,
@@ -153,7 +164,7 @@ describe("MongoDB Live Telemetry Integration Tests (Hybrid Branch)", () => {
     expect(latest?.source).toBe("simulated");
   });
 
-  it("computes statistical aggregates via MongoDB aggregation pipeline ($match, $facet, $group)", async () => {
+  it("computes statistical aggregates and detects active live status", async () => {
     if (!mongoAvailable) return;
     const res = await getStationLiveTelemetryWithAggregates(TEST_STATION_ID, 10);
 
@@ -163,6 +174,41 @@ describe("MongoDB Live Telemetry Integration Tests (Hybrid Branch)", () => {
     expect(res.stats.avgVoltage).toBeGreaterThan(400);
     expect(res.stats.avgFrequency).toBeGreaterThan(49.0);
     expect(res.stats.maxGridLoadKw).toBeGreaterThanOrEqual(110.5);
+    expect(res.status).toBe("live");
+    expect(res.isLive).toBe(true);
+    expect(res.ageSeconds).toBeLessThanOrEqual(30);
+  });
+
+  it("correctly identifies stale telemetry when readings are older than threshold", async () => {
+    if (!mongoAvailable) return;
+    // Insert reading from 5 minutes ago
+    await insertTelemetryBatch([
+      {
+        station_id: STALE_TEST_STATION_ID,
+        recorded_at: new Date(Date.now() - 300_000),
+        voltage_v: 410.0,
+        current_a: 50.0,
+        power_kw: 35.0,
+        frequency_hz: 50.0,
+        grid_load_kw: 40.0,
+        source: "simulated",
+      },
+    ]);
+
+    const res = await getStationLiveTelemetryWithAggregates(STALE_TEST_STATION_ID, 10);
+    expect(res.status).toBe("stale");
+    expect(res.isLive).toBe(false);
+    expect(res.ageSeconds).toBeGreaterThan(30);
+  });
+
+  it("gracefully handles stations with zero telemetry without crashing", async () => {
+    if (!mongoAvailable) return;
+    const res = await getStationLiveTelemetryWithAggregates(EMPTY_TEST_STATION_ID, 10);
+    expect(res.status).toBe("missing");
+    expect(res.isLive).toBe(false);
+    expect(res.latest).toBeNull();
+    expect(res.history).toEqual([]);
+    expect(res.stats.sampleCount).toBe(0);
   });
 
   it("preserves legitimate numeric zero values in telemetry statistics", async () => {

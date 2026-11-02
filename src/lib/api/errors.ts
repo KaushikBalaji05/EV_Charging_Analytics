@@ -23,8 +23,10 @@ const CONNECTION_CODES = new Set([
 export function isDatabaseUnavailable(err: unknown): boolean {
   const code = (err as { code?: string })?.code;
   if (code && (CONNECTION_CODES.has(code) || code.startsWith("08"))) return true;
+  const name = (err as Error)?.name ?? "";
+  if (/MongoServerSelectionError|MongoNetworkError|MongoTimeoutError/i.test(name)) return true;
   const msg = (err as Error)?.message ?? "";
-  return /timeout exceeded when trying to connect|Connection terminated/i.test(msg);
+  return /timeout exceeded when trying to connect|Connection terminated|Server selection timed out/i.test(msg);
 }
 
 export interface PublicError {

@@ -29,8 +29,8 @@ flowchart TD
         OCM --- MetaService
         CEA --- GridService
 
-        API_Legacy["Stage 1-4 APIs\n(/api/overview, /api/demand, etc.)"]
-        API_Hybrid["Stage 6 Hybrid APIs\n(/api/stations/[id]/hybrid-summary,\n/api/stations/[id]/live-telemetry)"]
+        API_Legacy["Stage 1-5 APIs\n(/api/overview, /api/demand, etc.)"]
+        API_Hybrid["Stage 6-7 Hybrid APIs\n(/api/stations/[id]/hybrid-summary,\n/api/stations/[id]/live-telemetry)"]
 
         PGQueries --> API_Legacy
         PGQueries & MongoQueries & MetaService & GridService --> API_Hybrid
@@ -76,8 +76,9 @@ flowchart TD
 | 2 | Migration 002 (analytical views, triggers, indexes), `GET /api/overview`, Overview dashboard | Complete |
 | 3 | Database-backed authentication (Argon2id, SHA-256 tokens), RBAC (ADMIN / ANALYST), user management | Complete |
 | 4 | Demand Analytics, Station Explorer & Details, Overload Explorer, Session Explorer (migration 004) | Complete |
-| 5 | Security Hardening (lockout counter persistence, charger 404 validation) | Implemented on `stage5-hardening` branch (pending merge into main) |
-| 6 | Hybrid data architecture: MongoDB live telemetry, OCM metadata, CEA grid context, hybrid dashboard | Substantially Complete on PR #3 / `review-stage6-pr3` |
+| 5 | Security Hardening (lockout counter persistence, charger 404 validation) | Complete & Integrated |
+| 6 | Hybrid data architecture: MongoDB live telemetry, OCM metadata, CEA grid context, hybrid dashboard | Complete |
+| 7 | Data Administration & Database Management: infrastructure health cards, PostgreSQL table explorer, MongoDB telemetry explorer, live telemetry monitor with Recharts trends, simulator diagnostics, controlled station/session data entry, and RFC 4180 CSV export | Complete & Integrated |
 
 ---
 
@@ -140,7 +141,7 @@ psql -U <your_user> -d ev_charging_analytics -f database/migrations/004_session_
 
 ### 4. MongoDB Telemetry Initialization
 
-Verify and build the MongoDB schema validator and time-series compound indexes:
+Verify and build the MongoDB schema validator and time-series compound indexes (automatically loads `.env.local`):
 
 ```bash
 npm run telemetry:init
@@ -157,7 +158,7 @@ npm run user:create -- --email admin@example.com --name "System Administrator" -
 
 ### 6. Running the Telemetry Simulator
 
-The telemetry simulator produces electrically realistic synthetic sensor readings (voltage sag, power factor, three-phase current, grid frequency, diurnal load curves) tagged with `source: "simulated"`:
+The telemetry simulator produces electrically realistic synthetic sensor readings (voltage sag, power factor, three-phase current, grid frequency, diurnal load curves) clamped within physical bounds and tagged with `source: "simulated"`:
 
 - **Generate a single batch (verified write check)**:
   ```bash
@@ -167,7 +168,11 @@ The telemetry simulator produces electrically realistic synthetic sensor reading
   ```bash
   npm run simulator:status
   ```
-- **Run continuous simulation in terminal**:
+- **Start continuous background daemon (supported on Windows & Unix)**:
+  ```bash
+  npm run simulator:start
+  ```
+- **Run continuous simulation in active terminal window**:
   ```bash
   npx tsx scripts/telemetry-simulator.ts --interval 5000
   ```
@@ -175,8 +180,6 @@ The telemetry simulator produces electrically realistic synthetic sensor reading
   ```bash
   npm run simulator:stop
   ```
-
-*(Note: On Windows systems, run the simulator in a dedicated terminal window using `npx tsx scripts/telemetry-simulator.ts` rather than `--daemon` due to background spawn platform constraints).*
 
 ### 7. Start the Development Server
 
@@ -190,12 +193,12 @@ Open [http://localhost:3000](http://localhost:3000) in your browser. Sign in usi
 
 ## Implemented Hybrid API Routes
 
-Both endpoints enforce session authentication and require at least the `ANALYST` role:
+Both endpoints enforce session authentication, require at least the `ANALYST` role, and validate that the requested station exists in PostgreSQL:
 
 | Endpoint | Access | Description |
 |---|---|---|
-| `GET /api/stations/[id]/hybrid-summary?limit=30` | Analyst+ | Returns unified payload combining Open Charge Map metadata, MongoDB live telemetry & aggregates, and CEA regional grid context. |
-| `GET /api/stations/[id]/live-telemetry?limit=30` | Analyst+ | Returns MongoDB live telemetry readings and statistical window aggregates (`avgVoltage`, `avgFrequency`, `avgPowerKw`, `maxGridLoadKw`). |
+| `GET /api/stations/[id]/hybrid-summary?limit=30` | Analyst+ | Returns unified payload combining Open Charge Map metadata, MongoDB live/stale telemetry & aggregates, and CEA regional grid context. Implements fault-tolerant partial degradation. |
+| `GET /api/stations/[id]/live-telemetry?limit=30` | Analyst+ | Returns MongoDB live telemetry readings and statistical window aggregates (`avgVoltage`, `avgFrequency`, `avgPowerKw`, `maxGridLoadKw`) with freshness status (`live`, `stale`, `missing`, `unavailable`). |
 
 ### Sample Response (`GET /api/stations/1/hybrid-summary`)
 
@@ -225,9 +228,12 @@ Both endpoints enforce session authentication and require at least the `ANALYST`
       "attribution": "Data curated from Open Charge Map Public Export under CC BY 4.0 International license"
     },
     "liveTelemetry": {
+      "status": "live",
+      "isLive": true,
+      "ageSeconds": 3,
       "latest": {
         "station_id": 1,
-        "recorded_at": "2026-10-29T11:22:28.703Z",
+        "recorded_at": "2026-10-31T11:22:28.703Z",
         "voltage_v": 413.9,
         "current_a": 67.3,
         "power_kw": 47.15,
@@ -256,13 +262,14 @@ Both endpoints enforce session authentication and require at least the `ANALYST`
     "sourceSummary": {
       "metadataSource": "open_charge_map_curated",
       "telemetrySource": "simulated",
+      "telemetryStatus": "live",
       "gridContextSource": "central_electricity_authority"
     }
   },
   "meta": {
     "source": "postgresql",
     "dataMode": "demo",
-    "generatedAt": "2026-10-29T11:22:30.000Z"
+    "generatedAt": "2026-10-31T11:22:30.000Z"
   }
 }
 ```
@@ -284,21 +291,19 @@ npm run lint
 npm test
 
 # Production build
-npm run build
+npx next build --webpack
 ```
 
 ### Verified Test Results
 
-- **Vitest**: **239 tests passing across 10 test files** (unit tests, query integration tests, authentication tests, and MongoDB integration tests).
+- **Vitest**: **294 tests passing across 14 test files** (unit tests, query integration tests, authentication tests, MongoDB integration tests, Stage 7 reliability and Data Administration integration test suites).
 - **TypeScript**: Passed with 0 errors (`tsc --noEmit`).
 - **ESLint**: Passed with 0 warnings or errors.
-- **Production Build**: Successfully compiled 27 routes with Turbopack / Webpack (`next build --webpack`).
+- **Production Build**: Successfully compiled 34 routes (`next build --webpack`).
 
 ---
 
 ## Known Limitations and Audit Notes
 
-1. **`DATABASE_URL` Notice during `telemetry:init`**: Running `tsx scripts/init-mongo.ts` directly does not load `.env.local` into `process.env`. The initialization script falls back to default MongoDB connection parameters (`mongodb://127.0.0.1:27017/ev_charging_analytics`), which succeeds locally. Pre-loading `--env-file=.env.local` eliminates this warning.
-2. **Simulator Daemon on Windows**: `simulator:start` (`--daemon`) spawns `node_modules/.bin/tsx` without `shell: true`, which exits immediately on Windows systems. Run `npx tsx scripts/telemetry-simulator.ts` in an active terminal for streaming simulation.
-3. **Turbopack Build on Windows**: `next build` with default Turbopack may encounter a process communication panic in `@tailwindcss/turbopack` on certain Windows configurations. Running `npx next build --webpack` completes cleanly without issue.
-4. **Stage 5 Merge Sequence**: The security hardening commits on `stage5-hardening` (persistent lockout counters, charger 404 validation) originated in parallel with the Stage 6 hybrid branch and require a fast-forward merge.
+1. **Turbopack Build on Windows**: `next build` with default Turbopack may encounter a process communication panic in `@tailwindcss/turbopack` on certain Windows configurations. Running `npx next build --webpack` completes cleanly without issue.
+2. **PostgreSQL Network Isolation in Sandboxes**: When executing automated integration tests inside isolated environments with sandbox restrictions, network access to localhost port `5432` must be granted so database connectivity tests can reach PostgreSQL.

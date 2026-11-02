@@ -13,6 +13,22 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { MongoClient } from "mongodb";
 
+// Auto-load .env.local if present
+const envLocalPath = path.resolve(process.cwd(), ".env.local");
+if (fs.existsSync(envLocalPath)) {
+  const lines = fs.readFileSync(envLocalPath, "utf-8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx > 0) {
+      const key = trimmed.slice(0, eqIdx).trim();
+      const val = trimmed.slice(eqIdx + 1).trim();
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+  }
+}
+
 const DEFAULT_INTERVAL_MS = 5000;
 const DEFAULT_STATIONS = [1, 2]; // Matches PostgreSQL sample data
 const LOCK_FILE = path.resolve(process.cwd(), ".simulator.pid");
@@ -108,22 +124,26 @@ export function generateReading(
     }
   }
 
-  const gridLoadKw = Number((spec.capacityKw * loadRatio).toFixed(2));
-  const powerKw = Number((gridLoadKw * (0.82 + randomFn() * 0.10)).toFixed(2));
+  const gridLoadKw = Number(Math.max(0, spec.capacityKw * loadRatio).toFixed(2));
+  const powerKw = Number(Math.max(0, gridLoadKw * (0.82 + randomFn() * 0.10)).toFixed(2));
 
-  // Indian grid frequency 50.00 Hz nominal
+  // Indian grid frequency 50.00 Hz nominal, physically clamped between 48.5 and 51.5 Hz
   const baseFreq = 50.00 - (loadRatio - 0.5) * 0.15;
-  const frequencyHz = Number((baseFreq + (randomFn() - 0.5) * 0.04).toFixed(3));
+  const frequencyHz = Number(
+    Math.max(48.5, Math.min(51.5, baseFreq + (randomFn() - 0.5) * 0.04)).toFixed(3),
+  );
 
-  // Three-phase voltage 415 V nominal with load sag
+  // Three-phase voltage 415 V nominal with load sag, physically clamped between 360V and 460V
   const voltageNominal = spec.voltageNominal;
   const vDrop = (loadRatio - 0.4) * 8;
-  const voltageV = Number((voltageNominal - vDrop + (randomFn() - 0.5) * 4).toFixed(1));
+  const voltageV = Number(
+    Math.max(360, Math.min(460, voltageNominal - vDrop + (randomFn() - 0.5) * 4)).toFixed(1),
+  );
 
   // Current calculation: Three-phase P = sqrt(3) * V * I * pf / 1000
   const powerFactor = Number((0.95 + randomFn() * 0.03).toFixed(3));
   const currentA = Number(
-    ((powerKw * 1000) / (Math.sqrt(3) * voltageV * powerFactor)).toFixed(1),
+    Math.max(0, (powerKw * 1000) / (Math.sqrt(3) * voltageV * powerFactor)).toFixed(1),
   );
 
   return {
@@ -223,12 +243,18 @@ async function main() {
     }
     const childArgs = process.argv.slice(2).filter((a) => a !== "--daemon");
     const logFd = fs.openSync(path.resolve(process.cwd(), ".simulator.log"), "a");
-    const tsxBin = path.resolve(process.cwd(), "node_modules/.bin/tsx");
+    const isWin = process.platform === "win32";
+    const tsxBin = path.resolve(process.cwd(), isWin ? "node_modules/.bin/tsx.cmd" : "node_modules/.bin/tsx");
     const scriptPath = path.resolve(process.cwd(), "scripts/telemetry-simulator.ts");
-    const child = spawn(tsxBin, [scriptPath, ...childArgs], {
+
+    const execCmd = isWin && !fs.existsSync(tsxBin) ? "npx.cmd" : tsxBin;
+    const execArgs = isWin && !fs.existsSync(tsxBin) ? ["tsx", scriptPath, ...childArgs] : [scriptPath, ...childArgs];
+
+    const child = spawn(execCmd, execArgs, {
       detached: true,
       stdio: ["ignore", logFd, logFd],
       env: process.env,
+      shell: isWin,
     });
     child.unref();
     console.log(`[simulator] Spawning background simulator daemon...`);
@@ -283,7 +309,7 @@ async function main() {
   }
 
   console.log(`[simulator] Connecting to MongoDB (${MONGODB_URI}/${MONGODB_DB_NAME})...`);
-  const client = new MongoClient(MONGODB_URI);
+  const client = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
   await client.connect();
   const db = client.db(MONGODB_DB_NAME);
   const collection = db.collection(TELEMETRY_COLLECTION);

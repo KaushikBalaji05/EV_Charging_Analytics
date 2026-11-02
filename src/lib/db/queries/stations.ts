@@ -85,6 +85,12 @@ export async function assertStationExists(stationId: number): Promise<void> {
   if (rows.length === 0) throw new ApiError(404, "NOT_FOUND", "Station not found.");
 }
 
+/** Throws 404 if the charger does not exist. Used by listSessions to give consistent feedback for unknown charger filters. */
+export async function assertChargerExists(chargerId: number): Promise<void> {
+  const rows = await query(`SELECT 1 FROM charger WHERE charger_id = $1`, [chargerId]);
+  if (rows.length === 0) throw new ApiError(404, "NOT_FOUND", "Charger not found.");
+}
+
 export const listStationOptions = () =>
   query<StationOption>(
     `SELECT station_id AS "stationId", station_name AS "stationName" FROM charging_station ORDER BY station_name, station_id`,

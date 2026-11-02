@@ -41,19 +41,48 @@ export async function sessionTokenFor(u: TestUser): Promise<string> {
   return /ev_session=([^;]+)/.exec(res.headers.get("set-cookie") ?? "")?.[1] ?? "";
 }
 
-/** Removes only rows created by tests. If the last-admin trigger cannot be paused, makes them unusable instead. */
+/**
+ * Removes only rows created by tests.
+ *
+ * Happy path: a plain DELETE inside a transaction succeeds whenever at least one
+ * non-test ADMIN already exists in the database (the normal setup). No DDL is run.
+ *
+ * Fallback (test admins are the only admins): the last-admin trigger blocks the
+ * plain DELETE, so we fall back to a DDL disable/enable pair on a dedicated
+ * connection. The ENABLE is in a finally block so it runs even if the DELETE fails.
+ */
 export async function cleanupTestUsers(): Promise<void> {
+  // --- happy path ---
   const client = await getPool().connect();
+  let needsFallback = false;
   try {
     await client.query("BEGIN");
-    await client.query("ALTER TABLE app_user DISABLE TRIGGER trg_protect_last_admin");
     await client.query("DELETE FROM app_user WHERE email LIKE $1", [TEST_EMAIL_LIKE]);
-    await client.query("ALTER TABLE app_user ENABLE TRIGGER trg_protect_last_admin");
     await client.query("COMMIT");
-  } catch {
+    return;
+  } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
-    await client.query("UPDATE app_user SET password_hash = '!' WHERE email LIKE $1", [TEST_EMAIL_LIKE]).catch(() => undefined);
+    needsFallback = (err as { code?: string }).code === "EV001";
+    if (!needsFallback) {
+      // Unexpected error: make accounts unusable as a last resort.
+      await client.query("UPDATE app_user SET password_hash = '!', is_active = false WHERE email LIKE $1", [TEST_EMAIL_LIKE]).catch(() => undefined);
+    }
   } finally {
     client.release();
+  }
+  if (!needsFallback) return;
+
+  // --- fallback: test admins are the only admins in this database ---
+  // DISABLE/ENABLE TRIGGER cannot be rolled back, so we use a dedicated connection
+  // and put ENABLE TRIGGER in a finally block to guarantee it always re-fires.
+  const c2 = await getPool().connect();
+  try {
+    await c2.query("ALTER TABLE app_user DISABLE TRIGGER trg_protect_last_admin");
+    await c2.query("DELETE FROM app_user WHERE email LIKE $1", [TEST_EMAIL_LIKE]);
+  } catch {
+    await c2.query("UPDATE app_user SET password_hash = '!', is_active = false WHERE email LIKE $1", [TEST_EMAIL_LIKE]).catch(() => undefined);
+  } finally {
+    await c2.query("ALTER TABLE app_user ENABLE TRIGGER trg_protect_last_admin").catch(() => undefined);
+    c2.release();
   }
 }

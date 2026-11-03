@@ -119,16 +119,18 @@ function LiveTooltip({ active, payload }: TooltipContentProps) {
   const p = payload?.[0]?.payload as TelemetryPoint | undefined;
   if (!active || !p) return null;
   return (
-    <div className="rounded border border-rule bg-panel px-3 py-2 text-sm shadow-sm">
-      <p className="font-medium">{formatTimestamp(p.recorded_at.toString())}</p>
-      <p className="text-charge">Power {formatKw(p.power_kw)}</p>
-      <p className={p.metadata?.is_overloaded ? "font-semibold text-overload" : ""}>
-        Grid load {formatKw(p.grid_load_kw)}{p.metadata?.is_overloaded ? " (OVERLOAD)" : ""}
-      </p>
-      <p className="text-muted">
-        {p.voltage_v} V · {p.current_a} A · {p.frequency_hz.toFixed(3)} Hz
-      </p>
-      <p className="text-xs text-muted/80">Source: {p.source} (MongoDB)</p>
+    <div className="rounded-lg border border-rule/80 bg-panel/95 backdrop-blur px-3 py-2 text-xs shadow-xl text-ink">
+      <p className="font-semibold text-charge">{formatTimestamp(p.recorded_at.toString())}</p>
+      <div className="mt-1 space-y-0.5">
+        <p className="text-cyan-400 font-semibold">EV Power: {formatKw(p.power_kw)}</p>
+        <p className={p.metadata?.is_overloaded ? "font-semibold text-overload" : "text-amber-400 font-medium"}>
+          Grid Load: {formatKw(p.grid_load_kw)}{p.metadata?.is_overloaded ? " (OVERLOAD)" : ""}
+        </p>
+        <p className="text-muted">
+          {p.voltage_v} V · {p.current_a} A · {p.frequency_hz.toFixed(3)} Hz
+        </p>
+        <p className="text-[10px] text-muted/80">Source: {p.source} (MongoDB)</p>
+      </div>
     </div>
   );
 }
@@ -475,32 +477,32 @@ export function HybridStationView({
             <div className="h-60 w-full" role="img" aria-label="Electrical telemetry line chart">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={history} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-                  <CartesianGrid vertical={false} stroke="#d5dedb" />
+                  <CartesianGrid vertical={false} stroke="#1e293b" strokeDasharray="3 3" />
                   <XAxis
                     dataKey="recorded_at"
                     tickFormatter={(val) => formatShortTimestamp(val.toString())}
-                    tick={{ fontSize: 11 }}
-                    stroke="#55666e"
+                    tick={{ fontSize: 11, fill: "#94a3b8" }}
+                    stroke="#334155"
                     minTickGap={28}
                   />
                   <YAxis
-                    tick={{ fontSize: 11 }}
-                    stroke="#55666e"
+                    tick={{ fontSize: 11, fill: "#94a3b8" }}
+                    stroke="#334155"
                     width={44}
                     label={{
                       value: "kW",
                       angle: -90,
                       position: "insideLeft",
                       fontSize: 11,
-                      fill: "#55666e",
+                      fill: "#94a3b8",
                     }}
                   />
                   <Tooltip content={LiveTooltip} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} />
                   <Line
                     dataKey="grid_load_kw"
-                    name="Transformer load (kW)"
-                    stroke="#b83a0c"
+                    name="Transformer Load (kW)"
+                    stroke="#f59e0b"
                     strokeWidth={2}
                     dot={history.length < 25}
                     isAnimationActive={false}
@@ -508,7 +510,7 @@ export function HybridStationView({
                   <Line
                     dataKey="power_kw"
                     name="EV Power (kW)"
-                    stroke="#0b7a6b"
+                    stroke="#06b6d4"
                     strokeWidth={2}
                     dot={history.length < 25}
                     isAnimationActive={false}

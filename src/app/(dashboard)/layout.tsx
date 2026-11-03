@@ -2,22 +2,22 @@ import { Suspense } from "react";
 import { NavLinks, type NavItem } from "@/components/dashboard/nav-links";
 import { StaticNav } from "@/components/dashboard/static-nav";
 import { SignOutButton } from "@/components/auth/sign-out-button";
+import { DashboardTopBar, TopBarSkeleton } from "@/components/dashboard/top-bar";
 import { getCurrentUser } from "@/lib/auth/dal";
 
-// Pages are switched on as each build stage lands; unbuilt ones render as disabled.
 const NAV: NavItem[] = [
   { href: "/", label: "Overview", ready: true },
-  { href: "/demand", label: "Demand analytics", ready: true },
-  { href: "/stations", label: "Station explorer", ready: true },
-  { href: "/overloads", label: "Overload explorer", ready: true },
-  { href: "/sessions", label: "Charging sessions", ready: true },
-  { href: "/admin/users", label: "User management", ready: true, adminOnly: true },
-  { href: "/data-administration", label: "Data administration", ready: true, adminOnly: true },
+  { href: "/demand", label: "Demand Analytics", ready: true },
+  { href: "/stations", label: "Station Explorer", ready: true },
+  { href: "/overloads", label: "Overload Explorer", ready: true },
+  { href: "/sessions", label: "Charging Sessions", ready: true },
+  { href: "/admin/users", label: "User Management", ready: true, adminOnly: true },
+  { href: "/data-administration", label: "Data Administration", ready: true, adminOnly: true },
 ];
 
 const publicItems = NAV.filter((i) => !i.adminOnly);
 
-/** Hides admin-only links from analysts. This is cosmetic: the pages and APIs enforce roles themselves. */
+/** Hides admin-only links from analysts. */
 async function SidebarNav() {
   const user = await getCurrentUser().catch(() => null);
   return <NavLinks items={user?.role === "ADMIN" ? NAV : publicItems} />;
@@ -26,45 +26,98 @@ async function SidebarNav() {
 async function SidebarUser() {
   const user = await getCurrentUser().catch(() => null);
   if (!user) return null;
+
   return (
-    <div className="border-t border-rule px-4 py-4">
-      <p className="truncate text-sm font-medium">{user.displayName}</p>
-      <p className="truncate text-xs text-muted">{user.email}</p>
-      <p className="mt-1 text-xs text-muted">Role: {user.role === "ADMIN" ? "Administrator" : "Analyst"}</p>
-      <div className="mt-3">
+    <div className="border-t border-rule/70 bg-panel-elevated/30 p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-charge/15 border border-charge/30 font-mono text-xs font-bold text-charge">
+          {user.displayName
+            .split(" ")
+            .map((n) => n[0])
+            .slice(0, 2)
+            .join("")
+            .toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold text-ink">{user.displayName}</p>
+          <p className="truncate text-[11px] text-muted font-mono">{user.email}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between">
+        <span
+          className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+            user.role === "ADMIN"
+              ? "bg-amber-500/15 text-amber-400 border border-amber-500/25"
+              : "bg-cyan-500/15 text-cyan-400 border border-cyan-500/25"
+          }`}
+        >
+          {user.role === "ADMIN" ? "Administrator" : "Analyst"}
+        </span>
         <SignOutButton />
       </div>
     </div>
   );
 }
 
+async function TopBar() {
+  const user = await getCurrentUser().catch(() => null);
+  return <DashboardTopBar userRole={user?.role} userName={user?.displayName} />;
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[15rem_1fr]">
+    <div className="min-h-screen lg:grid lg:grid-cols-[16rem_1fr] bg-paper">
+      {/* Sidebar */}
       <aside className="flex flex-col border-b border-rule bg-panel lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
-        <div className="flex items-center justify-between px-4 py-3 lg:block lg:px-5 lg:py-5">
-          <p className="font-semibold leading-tight">
-            EV Charging
-            <span className="block text-sm font-normal text-muted">Demand &amp; grid load analytics</span>
-          </p>
+        {/* Brand Header */}
+        <div className="flex items-center justify-between border-b border-rule/70 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-teal-600 shadow-md shadow-cyan-950/40 text-lg">
+              ⚡
+            </div>
+            <div>
+              <p className="text-sm font-bold tracking-tight text-ink">EV Charging Analytics</p>
+              <p className="text-[11px] font-medium text-muted">Grid Load &amp; Demand Platform</p>
+            </div>
+          </div>
         </div>
-        {/* Mobile: collapsible menu. Desktop: always visible. */}
-        <details className="group px-2 pb-2 lg:hidden">
-          <summary className="cursor-pointer list-none rounded px-3 py-2 text-sm font-medium text-charge">Menu</summary>
-          <Suspense fallback={<StaticNav items={publicItems} />}>
-            <SidebarNav />
-          </Suspense>
+
+        {/* Mobile Navigation Drawer */}
+        <details className="group px-3 py-2 border-b border-rule/60 lg:hidden">
+          <summary className="flex items-center justify-between cursor-pointer list-none rounded-lg bg-panel-elevated/60 px-3 py-2 text-xs font-medium text-charge">
+            <span>Navigation Menu</span>
+            <span className="text-xs transition-transform group-open:rotate-180">▼</span>
+          </summary>
+          <div className="mt-2 space-y-1">
+            <Suspense fallback={<StaticNav items={publicItems} />}>
+              <SidebarNav />
+            </Suspense>
+          </div>
         </details>
-        <div className="hidden flex-1 px-2 lg:block">
+
+        {/* Desktop Sidebar Navigation */}
+        <div className="hidden flex-1 overflow-y-auto px-3 py-2 lg:block">
           <Suspense fallback={<StaticNav items={publicItems} />}>
             <SidebarNav />
           </Suspense>
         </div>
+
+        {/* User Profile Footer */}
         <Suspense fallback={null}>
           <SidebarUser />
         </Suspense>
       </aside>
-      <main className="min-w-0 px-4 py-6 lg:px-8">{children}</main>
+
+      {/* Main Content Area */}
+      <div className="flex flex-col min-w-0">
+        <Suspense fallback={<TopBarSkeleton />}>
+          <TopBar />
+        </Suspense>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 max-w-7xl w-full mx-auto">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

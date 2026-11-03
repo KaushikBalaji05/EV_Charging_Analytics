@@ -8,7 +8,6 @@ import { getOverview, type Overview } from "@/lib/db/queries/overview";
 import { OverviewQuerySchema } from "@/lib/validation/overview";
 import { formatHourRange, formatInt, formatKwh } from "@/lib/format";
 import { DateFilter } from "@/components/dashboard/date-filter";
-import { DataNotice } from "@/components/dashboard/data-notice";
 import { KpiLedger } from "@/components/dashboard/kpi-ledger";
 import { HourlyDemandChart } from "@/components/dashboard/hourly-demand-chart";
 import { StationComparisonChart } from "@/components/dashboard/station-comparison-chart";
@@ -88,14 +87,13 @@ async function OverviewContent({ searchParams }: { searchParams: SearchParams })
     );
   }
 
-  const { kpis, hourly, stations, recentOverloads, recentTelemetry, freshness } = overview;
+  const { kpis, hourly, stations, recentOverloads, recentTelemetry } = overview;
   const peak = hourly.reduce((best, h) => (h.energyKwh > best.energyKwh ? h : best), hourly[0]);
   const hasDemand = kpis.totalSessions > 0 && peak.energyKwh > 0;
 
   return (
     <>
       <DateFilter action="/" from={from} to={to} />
-      <DataNotice dataMode={dataMode} latestTelemetryAt={freshness.latestTelemetryAt} latestCapacityAt={freshness.latestCapacityAt} />
       <KpiLedger kpis={kpis} />
 
       <div className="grid gap-6 lg:grid-cols-2">

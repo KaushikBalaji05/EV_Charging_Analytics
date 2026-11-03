@@ -45,3 +45,5 @@ next-env.d.ts
 # simulator runtime artifacts
 .simulator.pid
 .simulator.log
+
+.simulator.meta.json

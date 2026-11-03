@@ -10,7 +10,6 @@ import { OverloadQuerySchema } from "@/lib/validation/listing";
 import { describeIssues, flattenSearchParams } from "@/lib/validation/params";
 import { buildHref } from "@/lib/url";
 import { formatInt, formatKw, formatPct, formatTimestamp } from "@/lib/format";
-import { DataNoticeLoader } from "@/components/dashboard/data-notice-loader";
 import { DateFields, FilterForm, SelectField } from "@/components/dashboard/filter-form";
 import { Pagination } from "@/components/dashboard/pagination";
 import { Panel } from "@/components/dashboard/panel";
@@ -82,7 +81,6 @@ async function OverloadsContent({ searchParams }: { searchParams: SearchParams }
   return (
     <>
       <Filters options={options} v={flat} />
-      <DataNoticeLoader />
       <div className="rounded border border-rule bg-panel px-4 py-3 text-sm text-muted">
         <p>
           <strong className="text-ink">Capacity snapshots</strong> compare a station&apos;s measured load with its permitted load; a snapshot above 100% is an overload.{" "}

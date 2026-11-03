@@ -1,6 +1,7 @@
 "use client";
 
 import { DatabaseStatus, SimulatorInfo } from "@/lib/types/data-admin";
+import { formatTime } from "@/lib/format";
 
 interface DatabaseOverviewProps {
   postgres: DatabaseStatus;
@@ -70,8 +71,8 @@ export function DatabaseOverview({
             </div>
             <div className="flex justify-between py-1 border-b border-rule/50">
               <span className="text-muted">Last Checked</span>
-              <span className="text-muted">
-                {new Date(postgres.lastChecked).toLocaleTimeString()}
+              <span className="text-muted" suppressHydrationWarning>
+                {formatTime(postgres.lastChecked)}
               </span>
             </div>
 
@@ -141,9 +142,9 @@ export function DatabaseOverview({
             </div>
             <div className="flex justify-between py-1 border-b border-rule/50">
               <span className="text-muted">Latest Telemetry</span>
-              <span className="truncate max-w-[12rem] text-muted">
+              <span className="truncate max-w-[12rem] text-muted" suppressHydrationWarning>
                 {mongodb.stats.latestTelemetryAt
-                  ? new Date(mongodb.stats.latestTelemetryAt as string).toLocaleTimeString()
+                  ? formatTime(mongodb.stats.latestTelemetryAt as string)
                   : "No readings"}
               </span>
             </div>
@@ -219,9 +220,9 @@ export function DatabaseOverview({
             </div>
             <div className="flex justify-between py-1 border-b border-rule/50">
               <span className="text-muted">Latest Reading</span>
-              <span className="text-muted">
+              <span className="text-muted" suppressHydrationWarning>
                 {simulator.latestTelemetryAt
-                  ? new Date(simulator.latestTelemetryAt).toLocaleTimeString()
+                  ? formatTime(simulator.latestTelemetryAt)
                   : "N/A"}
               </span>
             </div>

@@ -11,7 +11,7 @@ import { describeIssues } from "@/lib/validation/params";
 import { dir, likePattern, offsetFor, paged, rangeClause } from "@/lib/db/queries/shared";
 import { computeTrend, type DailyDemandPoint } from "@/lib/db/queries/demand";
 import { buildHref } from "@/lib/url";
-import { formatDay, formatDuration, formatShortTimestamp } from "@/lib/format";
+import { formatDay, formatDuration, formatShortTimestamp, formatTime } from "@/lib/format";
 
 describe("station list schema", () => {
   it("applies safe defaults for an empty query", () => {
@@ -165,5 +165,12 @@ describe("URL and display helpers", () => {
     expect(formatDay("2026-10-20")).toBe("20 Oct 2026");
     expect(formatDay(null)).toBe("—");
     expect(formatShortTimestamp("2026-10-20 09:05:00")).toBe("20 Oct 09:05");
+  });
+  it("formatTime produces deterministic casing for AM and PM", () => {
+    expect(formatTime(null)).toBe("—");
+    const dMorning = new Date(2026, 9, 20, 9, 5, 8);
+    expect(formatTime(dMorning)).toBe("9:05:08 AM");
+    const dAfternoon = new Date(2026, 9, 20, 15, 4, 25);
+    expect(formatTime(dAfternoon)).toBe("3:04:25 PM");
   });
 });

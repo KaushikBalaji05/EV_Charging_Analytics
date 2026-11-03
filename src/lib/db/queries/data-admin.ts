@@ -1,9 +1,11 @@
 import "server-only";
 import fs from "node:fs";
 import path from "node:path";
+import type { Collection, Document } from "mongodb";
 import { query } from "@/lib/db/pool";
 import { getMongoDb, isMongoAvailable, TELEMETRY_COLLECTION } from "@/lib/db/mongodb";
 import { ApiError } from "@/lib/api/errors";
+import { formatTime } from "@/lib/format";
 import {
   ALLOWED_PG_TABLES,
   ALLOWED_MONGO_COLLECTIONS,
@@ -134,6 +136,7 @@ export async function getMongoOverview(): Promise<DatabaseStatus> {
 export async function getSimulatorInfo(): Promise<SimulatorInfo> {
   const lockFile = path.resolve(process.cwd(), ".simulator.pid");
   const logFile = path.resolve(process.cwd(), ".simulator.log");
+  const metaFile = path.resolve(process.cwd(), ".simulator.meta.json");
 
   let pid: number | null = null;
   let isRunning = false;
@@ -143,54 +146,110 @@ export async function getSimulatorInfo(): Promise<SimulatorInfo> {
       const content = fs.readFileSync(lockFile, "utf-8").trim();
       const parsedPid = parseInt(content, 10);
       if (!isNaN(parsedPid)) {
-        process.kill(parsedPid, 0); // throws if process is not alive
+        process.kill(parsedPid, 0); // Throws if process is dead
         pid = parsedPid;
         isRunning = true;
       }
     } catch {
       // Process is not running or stale lock
       isRunning = false;
+      pid = null;
     }
   }
 
-  // Read recent logs if present
-  const recentLogs: string[] = [];
-  if (fs.existsSync(logFile)) {
+  // If not running, clear stale lock file if left over
+  if (!isRunning && fs.existsSync(lockFile)) {
     try {
-      const logContent = fs.readFileSync(logFile, "utf-8");
-      const lines = logContent.split(/\r?\n/).filter(Boolean);
-      recentLogs.push(...lines.slice(-10));
+      fs.unlinkSync(lockFile);
     } catch {
       // ignore
     }
   }
 
-  // Get latest telemetry timestamp from MongoDB
+  // Read metadata if present
+  let meta: Record<string, unknown> = {};
+  if (fs.existsSync(metaFile)) {
+    try {
+      meta = JSON.parse(fs.readFileSync(metaFile, "utf-8"));
+    } catch {
+      meta = {};
+    }
+  }
+
+  // Determine final status
+  let finalStatus: "running" | "stopped" | "crashed" = "stopped";
+  if (isRunning) {
+    finalStatus = "running";
+  } else if (meta.status === "crashed") {
+    finalStatus = "crashed";
+  } else {
+    finalStatus = "stopped";
+  }
+
+  // Read recent logs if present and strip ANSI / control codes
+  const recentLogs: string[] = [];
+  if (fs.existsSync(logFile)) {
+    try {
+      const logContent = fs.readFileSync(logFile, "utf-8");
+      const lines = logContent
+        .split(/\r?\n/)
+        .map((l) =>
+          l
+            .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "") // ANSI escape codes
+            .replace(/\x03/g, "")                 // ETX (Ctrl+C character)
+            .replace(/\^C/g, "")                  // Literal ^C
+            .replace(/\r/g, "")
+            .trim()
+        )
+        .filter(Boolean);
+      recentLogs.push(...lines.slice(-15));
+    } catch {
+      // ignore
+    }
+  }
+
+  // Get latest telemetry timestamp from MongoDB (if reachable)
   let latestTelemetryAt: string | null = null;
   try {
-    const db = await getMongoDb();
-    const col = db.collection(TELEMETRY_COLLECTION);
-    const latestDoc = await col.findOne(
-      {},
-      { sort: { recorded_at: -1 }, projection: { recorded_at: 1 } }
-    );
-    if (latestDoc?.recorded_at) {
-      latestTelemetryAt =
-        latestDoc.recorded_at instanceof Date
-          ? latestDoc.recorded_at.toISOString()
-          : String(latestDoc.recorded_at);
+    const isUp = await isMongoAvailable(1000);
+    if (isUp) {
+      const db = await getMongoDb();
+      const col = db.collection(TELEMETRY_COLLECTION);
+      const latestDoc = await col.findOne(
+        {},
+        { sort: { recorded_at: -1 }, projection: { recorded_at: 1 } }
+      );
+      if (latestDoc?.recorded_at) {
+        latestTelemetryAt =
+          latestDoc.recorded_at instanceof Date
+            ? latestDoc.recorded_at.toISOString()
+            : String(latestDoc.recorded_at);
+      }
     }
   } catch {
     // Mongo might be unavailable
   }
 
+  const exitReason =
+    typeof meta.exitReason === "string"
+      ? meta.exitReason
+      : typeof meta.error === "string"
+      ? meta.error
+      : !isRunning
+      ? "Stopped by operator"
+      : null;
+
   return {
-    status: isRunning ? "running" : "stopped",
+    status: finalStatus,
     pid,
-    configuredIntervalMs: 5000,
-    simulatedStations: [1, 2],
+    configuredIntervalMs: typeof meta.intervalMs === "number" ? meta.intervalMs : 5000,
+    simulatedStations: Array.isArray(meta.stations) ? (meta.stations as number[]) : [1, 2],
     latestTelemetryAt,
     recentLogs,
+    startedAt: typeof meta.startedAt === "string" ? meta.startedAt : null,
+    stoppedAt: typeof meta.stoppedAt === "string" ? meta.stoppedAt : null,
+    exitReason,
+    scenario: typeof meta.scenario === "string" ? meta.scenario : "diurnal",
   };
 }
 
@@ -306,6 +365,14 @@ export async function queryTableRecords(options: {
 
   const rows = await query<Record<string, unknown>>(dataSql, dataParams);
 
+  if (table === "app_user") {
+    for (const row of rows) {
+      if ("password_hash" in row) {
+        row.password_hash = "[PROTECTED_ARGON2_HASH]";
+      }
+    }
+  }
+
   return {
     table,
     columns,
@@ -384,38 +451,99 @@ export async function queryMongoRecords(options: {
 // LIVE TELEMETRY & TRENDS
 // ============================================================================
 
-export async function getLiveTelemetryOverview(): Promise<LiveTelemetrySummary[]> {
-  const db = await getMongoDb();
-  const col = db.collection(TELEMETRY_COLLECTION);
-
-  // Distinct station IDs
-  const stationIds = ((await col.distinct("station_id")) as number[]).sort((a, b) => a - b);
-  if (stationIds.length === 0) return [];
-
-  // Query latest document for each station
-  const summaries: LiveTelemetrySummary[] = [];
-
-  for (const sId of stationIds) {
-    const latest = await col.findOne({ station_id: sId }, { sort: { recorded_at: -1 } });
-    if (latest) {
-      summaries.push({
-        stationId: sId,
-        stationName: latest.metadata?.station_name ?? `Station #${sId}`,
-        recordedAt:
-          latest.recorded_at instanceof Date
-            ? latest.recorded_at.toISOString()
-            : String(latest.recorded_at),
-        voltageV: Number(latest.voltage_v) || 0,
-        currentA: Number(latest.current_a) || 0,
-        powerKw: Number(latest.power_kw) || 0,
-        frequencyHz: Number(latest.frequency_hz) || 0,
-        gridLoadKw: Number(latest.grid_load_kw) || 0,
-        source: latest.source ?? "simulated",
-        isOverloaded: Boolean(latest.metadata?.is_overloaded),
-        capacityKw: Number(latest.metadata?.capacity_kw) || 100,
-      });
-    }
+export async function getLiveTelemetryOverview(filterStationId?: number): Promise<LiveTelemetrySummary[]> {
+  let pgSql = `SELECT station_id, station_name, total_capacity_kw FROM charging_station`;
+  const params: unknown[] = [];
+  if (filterStationId !== undefined && !isNaN(filterStationId)) {
+    pgSql += ` WHERE station_id = $1`;
+    params.push(filterStationId);
   }
+  pgSql += ` ORDER BY station_id ASC`;
+
+  let pgStations: Array<{
+    station_id: number;
+    station_name: string;
+    total_capacity_kw: number;
+  }> = [];
+
+  try {
+    pgStations = await query<{
+      station_id: number;
+      station_name: string;
+      total_capacity_kw: number;
+    }>(pgSql, params);
+  } catch (err) {
+    console.error("[data-admin] Failed to fetch stations from PostgreSQL:", err);
+    return [];
+  }
+
+  if (pgStations.length === 0) return [];
+
+  let col: Collection<Document> | null = null;
+  try {
+    const isUp = await isMongoAvailable(1000);
+    if (isUp) {
+      const db = await getMongoDb();
+      col = db.collection(TELEMETRY_COLLECTION);
+    }
+  } catch {
+    // Mongo unavailable
+  }
+
+  const summaries: LiveTelemetrySummary[] = await Promise.all(
+    pgStations.map(async (st) => {
+      let latest: Document | null = null;
+      if (col) {
+        try {
+          latest = await col.findOne(
+            { station_id: st.station_id },
+            { sort: { recorded_at: -1 } }
+          );
+        } catch {
+          // ignore per-station error
+        }
+      }
+
+      if (latest) {
+        const recordedDate =
+          latest.recorded_at instanceof Date ? latest.recorded_at : new Date(latest.recorded_at);
+        const ageMs = Date.now() - recordedDate.getTime();
+        const isStale = ageMs > 60000;
+
+        return {
+          stationId: st.station_id,
+          stationName: st.station_name,
+          hasTelemetry: true,
+          status: isStale ? "STALE" : "STREAMING",
+          recordedAt: recordedDate.toISOString(),
+          voltageV: Number(latest.voltage_v) || 0,
+          currentA: Number(latest.current_a) || 0,
+          powerKw: Number(latest.power_kw) || 0,
+          frequencyHz: Number(latest.frequency_hz) || 0,
+          gridLoadKw: Number(latest.grid_load_kw) || 0,
+          source: latest.source ?? "simulated",
+          isOverloaded: Boolean(latest.metadata?.is_overloaded),
+          capacityKw: Number(latest.metadata?.capacity_kw) || Number(st.total_capacity_kw) || 100,
+        };
+      } else {
+        return {
+          stationId: st.station_id,
+          stationName: st.station_name,
+          hasTelemetry: false,
+          status: "NO_TELEMETRY",
+          recordedAt: null,
+          voltageV: null,
+          currentA: null,
+          powerKw: null,
+          frequencyHz: null,
+          gridLoadKw: null,
+          source: "none",
+          isOverloaded: false,
+          capacityKw: Number(st.total_capacity_kw) || 0,
+        };
+      }
+    })
+  );
 
   return summaries;
 }
@@ -437,10 +565,7 @@ export async function getRecentTelemetryTrend(stationId?: number, limit = 20): P
 
   // Return in chronological order for charting
   return docs.reverse().map((d) => ({
-    recordedAt:
-      d.recorded_at instanceof Date
-        ? d.recorded_at.toLocaleTimeString()
-        : String(d.recorded_at),
+    recordedAt: formatTime(d.recorded_at),
     stationId: d.station_id,
     powerKw: Number(d.power_kw) || 0,
     gridLoadKw: Number(d.grid_load_kw) || 0,

@@ -133,6 +133,20 @@ describe.skipIf(!hasDb)("Stage 7 — Data Administration & Database Management I
       expect(tableNames).toContain("charging_session");
       expect(tableNames).toContain("charger");
       expect(tableNames).toContain("ev");
+      expect(tableNames).toContain("app_user");
+      expect(tableNames).toContain("auth_session");
+    });
+
+    it("redacts sensitive argon2 password hashes when querying app_user", async () => {
+      const res = await pgRecordsGET(
+        req("/api/admin/data/postgres/records?table=app_user&page=1&limit=5", { cookie: adminToken })
+      );
+      expect(res.status).toBe(200);
+      const { data } = await body(res);
+      expect(data.rows.length).toBeGreaterThan(0);
+      for (const row of data.rows) {
+        expect(row.password_hash).toBe("[PROTECTED_ARGON2_HASH]");
+      }
     });
 
     it("rejects unauthorized or arbitrary table names with 400", async () => {
@@ -263,12 +277,25 @@ describe.skipIf(!hasDb)("Stage 7 — Data Administration & Database Management I
 
       expect(Array.isArray(data.latest)).toBe(true);
       expect(Array.isArray(data.trend)).toBe(true);
+      expect(data.simulator).toBeDefined();
+
       if (data.latest.length > 0) {
-        const item = data.latest[0];
-        expect(item.stationId).toBeDefined();
-        expect(item.powerKw).toBeTypeOf("number");
-        expect(item.gridLoadKw).toBeTypeOf("number");
-        expect(item.source).toBe("simulated");
+        // Station 1 has active telemetry in MongoDB
+        const streamingItem = data.latest.find((i: { stationId: number; hasTelemetry: boolean }) => i.stationId === 1);
+        if (streamingItem && streamingItem.hasTelemetry) {
+          expect(streamingItem.stationId).toBe(1);
+          expect(streamingItem.powerKw).toBeTypeOf("number");
+          expect(streamingItem.gridLoadKw).toBeTypeOf("number");
+          expect(streamingItem.source).toBe("simulated");
+        }
+
+        // Stations without telemetry report clear NO_TELEMETRY status and null readings
+        const idleItem = data.latest.find((i: { hasTelemetry: boolean }) => !i.hasTelemetry);
+        if (idleItem) {
+          expect(idleItem.hasTelemetry).toBe(false);
+          expect(idleItem.status).toBe("NO_TELEMETRY");
+          expect(idleItem.powerKw).toBeNull();
+        }
       }
     });
   });
@@ -303,6 +330,32 @@ describe.skipIf(!hasDb)("Stage 7 — Data Administration & Database Management I
       expect(res.status).toBe(400);
     });
 
+    it("rejects malformed JSON and oversized request bodies on data entry endpoints", async () => {
+      // Malformed JSON
+      const malformedRes = await stationsPOST(
+        new Request("http://localhost:3000/api/admin/data/stations", {
+          method: "POST",
+          headers: { host: "localhost:3000", cookie: `ev_session=${adminToken}`, "content-type": "application/json" },
+          body: "{not-valid-json",
+        })
+      );
+      expect(malformedRes.status).toBe(400);
+      const malformedJson = await body(malformedRes);
+      expect(malformedJson.error.code).toBe("INVALID_JSON");
+
+      // Oversized body (>10,000 characters)
+      const oversizedRes = await stationsPOST(
+        new Request("http://localhost:3000/api/admin/data/stations", {
+          method: "POST",
+          headers: { host: "localhost:3000", cookie: `ev_session=${adminToken}`, "content-type": "application/json" },
+          body: "x".repeat(10_001),
+        })
+      );
+      expect(oversizedRes.status).toBe(413);
+      const oversizedJson = await body(oversizedRes);
+      expect(oversizedJson.error.code).toBe("BODY_TOO_LARGE");
+    });
+
     it("inserts a valid charging station and verifies persistence in PostgreSQL", async () => {
       const stationPayload = {
         station_name: `Stage 7 Test Station ${Date.now()}`,
@@ -333,6 +386,10 @@ describe.skipIf(!hasDb)("Stage 7 — Data Administration & Database Management I
       expect(rows.length).toBe(1);
       expect(rows[0].station_name).toBe(stationPayload.station_name);
       expect(rows[0].total_capacity_kw).toBe(175.0);
+
+      // Clean up test station immediately so concurrent test workers are not affected
+      await query(`DELETE FROM charging_station WHERE station_id = $1`, [createdStationId]);
+      createdStationId = null;
     });
 
     it("rejects invalid charging session (e.g. charger not belonging to station)", async () => {
@@ -408,6 +465,10 @@ describe.skipIf(!hasDb)("Stage 7 — Data Administration & Database Management I
       expect(rows.length).toBe(1);
       expect(rows[0].energy_kwh).toBe(38.5);
       expect(rows[0].cost).toBe(450.0);
+
+      // Clean up test session immediately so concurrent test workers are not affected
+      await query(`DELETE FROM charging_session WHERE session_id = $1`, [createdSessionId]);
+      createdSessionId = null;
     });
   });
 

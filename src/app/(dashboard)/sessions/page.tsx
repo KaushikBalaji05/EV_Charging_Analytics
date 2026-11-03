@@ -10,7 +10,6 @@ import { SessionQuerySchema } from "@/lib/validation/listing";
 import { describeIssues, flattenSearchParams } from "@/lib/validation/params";
 import { buildHref } from "@/lib/url";
 import { formatDuration, formatInr, formatInt, formatKw, formatKwh, formatTimestamp } from "@/lib/format";
-import { DataNoticeLoader } from "@/components/dashboard/data-notice-loader";
 import { DateFields, FilterForm, SelectField, TextField } from "@/components/dashboard/filter-form";
 import { Pagination } from "@/components/dashboard/pagination";
 import { Panel } from "@/components/dashboard/panel";
@@ -84,7 +83,6 @@ async function SessionsContent({ searchParams }: { searchParams: SearchParams })
   return (
     <>
       <Filters options={options} v={flat} />
-      <DataNoticeLoader />
       <StatStrip
         items={[
           { label: "Matching sessions", value: formatInt(totals.sessions), note: totals.ongoingSessions > 0 ? `${totals.ongoingSessions} ongoing` : undefined },

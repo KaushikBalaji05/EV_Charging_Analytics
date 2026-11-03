@@ -8,7 +8,6 @@ import { listStationOptions, type StationOption } from "@/lib/db/queries/station
 import { DemandQuerySchema } from "@/lib/validation/listing";
 import { describeIssues, flattenSearchParams } from "@/lib/validation/params";
 import { formatDay, formatHourRange, formatInr, formatInt, formatKwh } from "@/lib/format";
-import { DataNoticeLoader } from "@/components/dashboard/data-notice-loader";
 import { DailyDemandChart } from "@/components/dashboard/daily-demand-chart";
 import { DateFields, FilterForm, SelectField } from "@/components/dashboard/filter-form";
 import { HourlyDemandChart } from "@/components/dashboard/hourly-demand-chart";
@@ -83,7 +82,6 @@ async function DemandContent({ searchParams }: { searchParams: SearchParams }) {
   return (
     <>
       <Filters options={options} from={filter.from} to={filter.to} stationId={filter.stationId?.toString()} />
-      <DataNoticeLoader />
       <p className="text-sm text-muted">
         {stationName ?? "All stations"} · {filter.from || filter.to ? `${filter.from ? formatDay(filter.from) : "earliest"} to ${filter.to ? formatDay(filter.to) : "latest"}` : "all recorded dates"}
       </p>

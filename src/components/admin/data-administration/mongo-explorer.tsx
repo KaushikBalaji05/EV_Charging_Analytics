@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ALLOWED_MONGO_COLLECTIONS } from "@/lib/types/data-admin";
 import { TableShell, td, th } from "@/components/dashboard/tables";
+import { formatTime } from "@/lib/format";
 
 export function MongoExplorer() {
   const [selectedCol, setSelectedCol] = useState<string>("grid_telemetry");
@@ -171,8 +172,8 @@ export function MongoExplorer() {
                 return (
                   <tr key={String(doc._id || idx)} className="hover:bg-paper/40 transition">
                     <td className={td}>
-                      <span className="text-ink font-semibold">
-                        {recDate ? recDate.toLocaleTimeString() : "N/A"}
+                      <span className="text-ink font-semibold" suppressHydrationWarning>
+                        {formatTime(doc.recorded_at as string | Date | null)}
                       </span>
                       <span className="block text-[10px] text-muted">
                         {recDate ? recDate.toISOString().slice(0, 10) : ""}

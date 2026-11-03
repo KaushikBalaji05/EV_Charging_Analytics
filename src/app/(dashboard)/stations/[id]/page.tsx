@@ -15,7 +15,6 @@ import { StationDetailQuerySchema, StationIdSchema } from "@/lib/validation/list
 import { describeIssues, flattenSearchParams } from "@/lib/validation/params";
 import { buildHref } from "@/lib/url";
 import { formatDuration, formatInr, formatInt, formatKw, formatKwh, formatPct, formatTimestamp } from "@/lib/format";
-import { DataNoticeLoader } from "@/components/dashboard/data-notice-loader";
 import { DateFilter } from "@/components/dashboard/date-filter";
 import { Panel } from "@/components/dashboard/panel";
 import { StatStrip } from "@/components/dashboard/stat-strip";
@@ -113,7 +112,6 @@ async function StationDetailContent({ params, searchParams }: { params: Params; 
       </header>
 
       <DateFilter action={`/stations/${id}`} from={range.from} to={range.to} />
-      <DataNoticeLoader />
 
       <StatStrip
         items={[

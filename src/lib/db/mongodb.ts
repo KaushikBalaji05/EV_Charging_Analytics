@@ -75,11 +75,15 @@ export async function getMongoDb(): Promise<Db> {
 }
 
 /** Check if MongoDB is reachable with a short timeout without throwing unhandled exceptions */
-export async function isMongoAvailable(timeoutMs = 2000): Promise<boolean> {
+export async function isMongoAvailable(timeoutMs = 1500): Promise<boolean> {
   try {
-    const client = await getMongoClient();
-    await client.db("admin").command({ ping: 1 }, { timeoutMS: timeoutMs });
-    return true;
+    const probePromise = (async () => {
+      const client = await getMongoClient();
+      await client.db("admin").command({ ping: 1 }, { timeoutMS: timeoutMs });
+      return true;
+    })();
+    const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs));
+    return await Promise.race([probePromise, timeoutPromise]);
   } catch {
     return false;
   }

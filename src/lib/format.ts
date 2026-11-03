@@ -35,6 +35,22 @@ const instant = new Intl.DateTimeFormat(APP_CONFIG.locale, {
 /** For TIMESTAMPTZ values (login times etc.): an exact instant, displayed in IST. */
 export const formatInstant = (d: Date | string | null) => (d ? `${instant.format(new Date(d))} IST` : "Never");
 
+/**
+ * Deterministically formats a date or ISO string to h:mm:ss A without locale case discrepancies.
+ * Avoids React hydration mismatch between Node.js and browser ICU locales (e.g. 'pm' vs 'PM').
+ */
+export function formatTime(d: Date | string | null): string {
+  if (!d) return "—";
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (isNaN(date.getTime())) return "—";
+  const hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  const formattedHours = hours % 12 || 12;
+  return `${formattedHours}:${minutes}:${seconds} ${ampm}`;
+}
+
 /** Compact stamp for chart axes: "20 Oct 10:00". Never builds a Date, so no time-zone shift. */
 export function formatShortTimestamp(ts: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(ts);

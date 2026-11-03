@@ -7,6 +7,8 @@ export const ALLOWED_PG_TABLES = [
   "charging_session",
   "grid_telemetry",
   "station_capacity",
+  "app_user",
+  "auth_session",
   "v_overload_events",
   "v_session_details",
   "v_station_latest_capacity",
@@ -31,12 +33,16 @@ export interface DatabaseStatus {
 }
 
 export interface SimulatorInfo {
-  status: "running" | "stopped";
+  status: "running" | "stopped" | "crashed";
   pid: number | null;
   configuredIntervalMs: number;
   simulatedStations: number[];
   latestTelemetryAt: string | null;
   recentLogs: string[];
+  startedAt?: string | null;
+  stoppedAt?: string | null;
+  exitReason?: string | null;
+  scenario?: string | null;
 }
 
 export interface TableColumnMetadata {
@@ -68,12 +74,14 @@ export interface MongoRecordsResult {
 export interface LiveTelemetrySummary {
   stationId: number;
   stationName: string;
-  recordedAt: string;
-  voltageV: number;
-  currentA: number;
-  powerKw: number;
-  frequencyHz: number;
-  gridLoadKw: number;
+  hasTelemetry: boolean;
+  status: "STREAMING" | "NO_TELEMETRY" | "STALE";
+  recordedAt: string | null;
+  voltageV: number | null;
+  currentA: number | null;
+  powerKw: number | null;
+  frequencyHz: number | null;
+  gridLoadKw: number | null;
   source: string;
   isOverloaded: boolean;
   capacityKw: number;

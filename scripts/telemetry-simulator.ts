@@ -32,9 +32,40 @@ if (fs.existsSync(envLocalPath)) {
 const DEFAULT_INTERVAL_MS = 5000;
 const DEFAULT_STATIONS = [1, 2]; // Matches PostgreSQL sample data
 const LOCK_FILE = path.resolve(process.cwd(), ".simulator.pid");
+const META_FILE = path.resolve(process.cwd(), ".simulator.meta.json");
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017";
 const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || "ev_charging_analytics";
 const TELEMETRY_COLLECTION = "grid_telemetry";
+
+export interface SimulatorMetadata {
+  pid: number | null;
+  status: "running" | "stopped" | "crashed";
+  startedAt: string | null;
+  stoppedAt: string | null;
+  exitReason: string | null;
+  scenario: string;
+  intervalMs: number;
+  stations: number[];
+  lastTickAt: string | null;
+  error?: string | null;
+}
+
+function writeMeta(meta: Partial<SimulatorMetadata>): void {
+  try {
+    let existing: Partial<SimulatorMetadata> = {};
+    if (fs.existsSync(META_FILE)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(META_FILE, "utf-8"));
+      } catch {
+        existing = {};
+      }
+    }
+    const merged = { ...existing, ...meta };
+    fs.writeFileSync(META_FILE, JSON.stringify(merged, null, 2), "utf-8");
+  } catch {
+    // Non-critical
+  }
+}
 
 // Station specifications (matching PostgreSQL Charging_Station table)
 const STATION_SPECS: Record<number, { name: string; capacityKw: number; voltageNominal: number }> = {
@@ -280,26 +311,57 @@ async function main() {
         process.kill(pid, "SIGTERM");
         console.log(`[simulator] Sent SIGTERM to PID: ${pid}`);
         releaseLock();
+        writeMeta({
+          status: "stopped",
+          stoppedAt: new Date().toISOString(),
+          exitReason: "Stopped by user command (--stop)",
+        });
       } catch (e) {
         console.error(`[simulator] Failed to stop PID ${pid}:`, e);
       }
     } else {
       console.log("[simulator] No running simulator instance found.");
+      writeMeta({
+        status: "stopped",
+        stoppedAt: new Date().toISOString(),
+        exitReason: "No running process found",
+      });
     }
     process.exit(0);
   }
 
   // Action is "run"
   acquireLock();
-  process.on("exit", releaseLock);
-  process.on("SIGINT", () => {
-    console.log("\n[simulator] Received SIGINT, exiting...");
+  writeMeta({
+    pid: process.pid,
+    status: "running",
+    startedAt: new Date().toISOString(),
+    stoppedAt: null,
+    exitReason: null,
+    scenario: options.scenario,
+    intervalMs: options.intervalMs,
+    stations: options.stations,
+    lastTickAt: null,
+  });
+
+  const cleanup = (reason: string) => {
+    writeMeta({
+      status: "stopped",
+      stoppedAt: new Date().toISOString(),
+      exitReason: reason,
+    });
     releaseLock();
+  };
+
+  process.on("exit", () => cleanup("Process exited"));
+  process.on("SIGINT", () => {
+    console.log("\n[simulator] Clean shutdown: Telemetry stream terminated safely by operator.");
+    cleanup("Operator interrupt (SIGINT)");
     process.exit(0);
   });
   process.on("SIGTERM", () => {
-    console.log("\n[simulator] Received SIGTERM, exiting...");
-    releaseLock();
+    console.log("\n[simulator] Clean shutdown: Telemetry stream terminated safely by system (SIGTERM).");
+    cleanup("Terminated by signal (SIGTERM)");
     process.exit(0);
   });
 
@@ -330,6 +392,8 @@ async function main() {
     );
 
     await collection.insertMany(batch);
+    writeMeta({ lastTickAt: now.toISOString() });
+
     const summary = batch
       .map(
         (b) =>
@@ -344,7 +408,7 @@ async function main() {
     if (options.once || (options.count > 0 && iterations >= options.count)) {
       console.log(`[simulator] Target iterations reached (${iterations}). Shutting down.`);
       await client.close();
-      releaseLock();
+      cleanup(`Completed ${iterations} target iterations`);
       process.exit(0);
     }
   }
@@ -361,6 +425,16 @@ async function main() {
 if (process.env.NODE_ENV !== "test") {
   main().catch((err) => {
     console.error("[simulator] Fatal error:", err);
+    try {
+      writeMeta({
+        status: "crashed",
+        stoppedAt: new Date().toISOString(),
+        exitReason: "Unhandled exception during startup",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } catch {
+      // ignore
+    }
     releaseLock();
     process.exit(1);
   });

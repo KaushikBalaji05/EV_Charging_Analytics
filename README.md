@@ -79,6 +79,7 @@ flowchart TD
 | 5 | Security Hardening (lockout counter persistence, charger 404 validation) | Complete & Integrated |
 | 6 | Hybrid data architecture: MongoDB live telemetry, OCM metadata, CEA grid context, hybrid dashboard | Complete |
 | 7 | Data Administration & Database Management: infrastructure health cards, PostgreSQL table explorer, MongoDB telemetry explorer, live telemetry monitor with Recharts trends, simulator diagnostics, controlled station/session data entry, and RFC 4180 CSV export | Complete & Integrated |
+| 8 | Complete Project Revamp: Dark UI/UX redesign, executive top bar, Partial Prerendering (PPR) suspense isolation, deterministic time formatting, PostgreSQL realistic fleet & demand expansion (18 Bengaluru stations, 52 chargers, 80 EVs, 750 sessions), and telemetry simulator diagnostics | Complete & Integrated |
 
 ---
 
@@ -137,9 +138,10 @@ psql -U <your_user> -d ev_charging_analytics -f database/postgresql_sample_data.
 psql -U <your_user> -d ev_charging_analytics -f database/migrations/002_analytics_views_and_triggers.sql
 psql -U <your_user> -d ev_charging_analytics -f database/migrations/003_users_and_sessions.sql
 psql -U <your_user> -d ev_charging_analytics -f database/migrations/004_session_detail_view.sql
+psql -U <your_user> -d ev_charging_analytics -f database/migrations/005_fix_station_capacity_guard.sql
 ```
 
-### 4. MongoDB Telemetry Initialization
+### 4. MongoDB Telemetry Initialization & Verification
 
 Verify and build the MongoDB schema validator and time-series compound indexes (automatically loads `.env.local`):
 
@@ -148,6 +150,14 @@ npm run telemetry:init
 ```
 
 *Expected output: `[mongo-init] Result: MongoDB telemetry schema and indexes verified`*
+
+Inspect and verify telemetry records stored in MongoDB with the read-only verification script:
+
+```bash
+node check-telemetry.mjs
+```
+
+*Displays total record count, connection latency, and latest 5 telemetry documents with electrical metrics.*
 
 ### 5. Create Initial Administrator Account
 
@@ -276,6 +286,104 @@ Both endpoints enforce session authentication, require at least the `ANALYST` ro
 
 ---
 
+## Stage 7 — Data Administration & Database Management
+
+Stage 7 implements an enterprise-grade database administration and operations dashboard (`/data-administration`, with `/admin` alias redirection) restricted to authenticated `ADMIN` accounts.
+
+### Data Administration Modules
+
+1. **Infrastructure Health Overview**:
+   - Independent latency ping tests for PostgreSQL and MongoDB.
+   - Live row counts across all operational PostgreSQL tables.
+   - MongoDB document counts, distinct station IDs, and latest recorded telemetry timestamp.
+   - Telemetry simulator background daemon status (running/stopped), process ID (PID), configured stream interval, and live tail of `.simulator.log`.
+
+2. **PostgreSQL Table Explorer**:
+   - Strict allowlist enforcement: allows `charging_station`, `charger`, `ev`, `charging_session`, `grid_telemetry`, `station_capacity`, and analytical views (`v_overload_events`, `v_session_details`, `v_station_latest_capacity`).
+   - Forbids and shields sensitive user/session tables (`app_user`, `auth_session`) from data inspection.
+   - Interactive schema inspector with Primary Key (PK) badges and PostgreSQL data types.
+   - Full-text search across varchar/text fields using parameterized SQL queries.
+   - Bi-directional sorting on allowlisted column names, page size selector (10, 20, 50 rows), and pagination.
+   - RFC 4180 compliant CSV export with formula injection mitigation (prepends apostrophe to leading `=`, `+`, `-`, `@`).
+
+3. **MongoDB Collection Explorer**:
+   - Allowlisted collection explorer for semi-structured document storage (`grid_telemetry`).
+   - Station-specific filtering and chronological sorting by `recorded_at DESC`.
+   - Tabular presentation of electrical metrics (EV power draw, feeder load, voltage, current, AC frequency, overload status, and simulation scenario).
+   - Modal JSON inspector displaying formatted raw BSON documents.
+   - Tabular CSV export with flattened document metadata.
+
+4. **Live Telemetry Monitor**:
+   - Real-time electrical telemetry streaming with automatic 5-second polling.
+   - Visibility auto-pause: polling automatically suspends when browser tab is hidden to conserve server resources.
+   - Manual controls: Pause/Resume toggle and instant manual Refresh.
+   - Overload status detection with conditional visual alerting.
+   - Responsive dual-axis Recharts time-series visualization comparing **EV Charging Power (kW)** against **Feeder Grid Load (kW)**.
+
+5. **Simulator Diagnostics**:
+   - Process supervisor monitoring `.simulator.pid` and verifying process liveliness.
+   - Real-time streaming parameters (5-second cadence, diurnal load modeling, simulated Bengaluru hubs #1 and #2).
+   - Live log buffer reviewing recent synthetic telemetry batches.
+
+6. **Controlled Data Entry**:
+   - Dedicated data entry forms for physical Charging Stations and Charging Sessions.
+   - Double-layer Zod validation on client and server.
+   - Dynamic foreign key lookups (auto-populating active stations, installed chargers, and registered EVs).
+   - Relational integrity verification (validating charger belongs to selected station, EV exists, positive capacity bounds, and non-inverted chronological timestamps).
+
+### Data Administration API Endpoints
+
+All Data Administration endpoints enforce session authentication, CSRF origin verification on state-changing methods, bounded request body limits (10 KB max to prevent DoS), and strict `ADMIN` role-based access control (returning HTTP 401 for unauthenticated requests and HTTP 403 for `ANALYST` users):
+
+| Endpoint | Method | Role | Description |
+|---|---|---|---|
+| `/api/admin/data/overview` | `GET` | Admin | Evaluates independent health checks and metrics for PostgreSQL, MongoDB, and Simulator. |
+| `/api/admin/data/postgres/tables` | `GET` | Admin | Lists allowlisted relational tables and views with real-time row counts. |
+| `/api/admin/data/postgres/records` | `GET` | Admin | Queries paginated rows, schema column metadata, search filter, sorting, and CSV export. |
+| `/api/admin/data/mongo/collections` | `GET` | Admin | Lists allowlisted MongoDB collections with document counts. |
+| `/api/admin/data/mongo/records` | `GET` | Admin | Queries paginated MongoDB telemetry documents with station filter and CSV export. |
+| `/api/admin/data/telemetry/live` | `GET` | Admin | Returns latest electrical readings per station and chronological trend buffer for charts. |
+| `/api/admin/data/options` | `GET` | Admin | Returns active stations, installed chargers, and EVs for controlled form dropdowns. |
+| `/api/admin/data/stations` | `POST` | Admin | Validates and inserts a new charging station record into `charging_station`. |
+| `/api/admin/data/sessions` | `POST` | Admin | Validates and inserts a verified charging session into `charging_session`. |
+
+---
+
+## Stage 8 — Complete Project Revamp & Realistic Scale
+
+Stage 8 provides a comprehensive overhaul across the user experience, application rendering performance, PostgreSQL data scale, and background simulator process resilience.
+
+### Key Enhancements
+
+1. **Modern Dark UI/UX Redesign**:
+   - Engineered with Tailwind CSS v4 design tokens.
+   - Deep charcoal canvas (`#090d16`), elevated slate panels (`#0f172a`, `#1e293b`), electric cyan accents (`#06b6d4`), and overload alerts (`#f43f5e`).
+   - Executive top bar header with live breadcrumbs, database status pills, user avatar initials, and role badges.
+   - High-contrast Recharts visualizations with dark backdrop-blur tooltips, gridlines (`#1e293b`), and tabular typography.
+
+2. **Partial Prerendering (PPR) & Hydration Safety**:
+   - Runtime client navigation hooks (`usePathname`) and cookie-dependent authentication lookups are isolated behind `<Suspense fallback={<TopBarSkeleton />}>`, allowing Next.js 16 to statically prerender page shells without blocking or throwing dynamic bail-out exceptions.
+   - Deterministic timestamp formatting (`formatTime()`) eliminates ICU meridiem casing mismatches (`pm` vs `PM`) between Node.js server runtimes and browser clients.
+
+3. **PostgreSQL Realistic Data Expansion**:
+   - Explicit opt-in seed script generating high-density Bengaluru charging infrastructure:
+     - **18 Charging Stations**: Distributed across key corridors (Indiranagar, Koramangala, Whitefield ITPL, Electronic City, HSR Layout, MG Road, Hebbal, etc.).
+     - **52 Chargers**: Multi-standard configurations (`DC_FAST`, `AC_NORMAL`, `AC_FAST` rated from 22 kW to 150 kW).
+     - **80 Electric Vehicles**: Representative Indian EV fleet (Tata Nexon EV, MG ZS EV, Mahindra XUV400, Hyundai Ioniq 5, Ather 450X, Ola S1 Pro).
+     - **750 Charging Sessions**: Modeled with realistic diurnal peak distribution (morning 8–10 AM & evening 6–9 PM peaks), valid duration bounds, non-negative costs, and realistic tariffs.
+     - **120 Capacity Snapshots**: With realistic baseline loads and evening peak overload occurrences (105%–125%).
+     - **15 App Users**: Administrator and Analyst roles with valid Argon2id password hashes (`Password123!`).
+   - **Idempotent & Reversible**:
+     - `npm run seed:pg`: Populates the expanded dataset.
+     - `npm run seed:pg:clean`: Safely purges seeded rows while leaving baseline sample data (Stations 1 & 2) 100% intact so standard unit and integration tests continue to pass cleanly.
+
+4. **Telemetry Simulator Diagnostics & Process Tracking**:
+   - Process state tracking via `.simulator.meta.json` recording `status` (`running`, `stopped`, `crashed`), `startedAt`, `stoppedAt`, `intervalMs`, `stations`, and `exitReason`.
+   - Graceful shutdown handlers for `SIGINT` and `SIGTERM` providing operator-friendly log notices and safe connection teardown.
+   - Web UI log viewer with automatic ANSI escape code stripping for clean diagnostics.
+
+---
+
 ## Automated Checks & Testing
 
 Run the full verification suite using package scripts:
@@ -291,19 +399,32 @@ npm run lint
 npm test
 
 # Production build
-npx next build --webpack
+npm run build
 ```
 
 ### Verified Test Results
 
-- **Vitest**: **294 tests passing across 14 test files** (unit tests, query integration tests, authentication tests, MongoDB integration tests, Stage 7 reliability and Data Administration integration test suites).
+- **Vitest**: **308 tests passing across 15 test files** (unit tests, query integration tests, authentication tests, MongoDB integration tests, Stage 7 reliability, and Stage 8 system revamp test suites).
 - **TypeScript**: Passed with 0 errors (`tsc --noEmit`).
 - **ESLint**: Passed with 0 warnings or errors.
-- **Production Build**: Successfully compiled 34 routes (`next build --webpack`).
+- **Production Build**: Successfully compiled 34 routes with Partial Prerendering.
+
+---
+
+## Development Mode Options
+
+- **Default Turbopack development server**:
+  ```bash
+  npm run dev
+  ```
+- **Webpack development server (recommended for maximum stability on Windows environments)**:
+  ```bash
+  npm run dev:webpack
+  ```
 
 ---
 
 ## Known Limitations and Audit Notes
 
-1. **Turbopack Build on Windows**: `next build` with default Turbopack may encounter a process communication panic in `@tailwindcss/turbopack` on certain Windows configurations. Running `npx next build --webpack` completes cleanly without issue.
+1. **Turbopack Build on Windows**: `next build` with default Turbopack may encounter a transient filesystem permission or process communication lock on certain Windows configurations. Running `npx next build --webpack` completes cleanly without issue.
 2. **PostgreSQL Network Isolation in Sandboxes**: When executing automated integration tests inside isolated environments with sandbox restrictions, network access to localhost port `5432` must be granted so database connectivity tests can reach PostgreSQL.

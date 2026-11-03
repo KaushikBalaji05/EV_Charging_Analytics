@@ -68,6 +68,12 @@ describe("Stage 7 — System Reliability & Resilience Unit Tests", () => {
       expect(overloadReading.grid_load_kw).toBeGreaterThan(100);
       expect(overloadReading.metadata.is_overloaded).toBe(true);
     });
+
+    it("handles empty telemetry batch safely with zero inserted count", async () => {
+      const { insertTelemetryBatch } = await import("@/lib/db/queries/telemetry-mongo");
+      const res = await insertTelemetryBatch([]);
+      expect(res.insertedCount).toBe(0);
+    });
   });
 
   describe("Database Error Classification & Error Sanitization", () => {

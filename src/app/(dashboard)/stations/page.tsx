@@ -10,7 +10,6 @@ import { StationListQuerySchema } from "@/lib/validation/listing";
 import { describeIssues, flattenSearchParams } from "@/lib/validation/params";
 import { buildHref } from "@/lib/url";
 import { formatInr, formatInt, formatKw, formatKwh } from "@/lib/format";
-import { DataNoticeLoader } from "@/components/dashboard/data-notice-loader";
 import { DateFields, FilterForm, SelectField, TextField } from "@/components/dashboard/filter-form";
 import { Pagination } from "@/components/dashboard/pagination";
 import { Panel } from "@/components/dashboard/panel";
@@ -91,7 +90,6 @@ async function StationsContent({ searchParams }: { searchParams: SearchParams })
   return (
     <>
       <Filters v={flat} />
-      <DataNoticeLoader />
       <p className="text-sm text-muted">
         Session and utilization figures cover {q.from || q.to ? "the selected dates" : "all recorded dates"}. Rank is among all stations for the chosen metric.
       </p>

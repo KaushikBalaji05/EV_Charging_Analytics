@@ -65,3 +65,43 @@ export const CreateSessionSchema = z
       path: ["end_time"],
     }
   );
+
+export const UpdateStationStatusSchema = z
+  .object({
+    action: z.enum(["deactivate", "reactivate", "set_status"]).optional(),
+    status: z.enum(["ACTIVE", "INACTIVE", "MAINTENANCE"]).optional(),
+  })
+  .refine(
+    (data) => Boolean(data.action || data.status),
+    { message: "Either action ('deactivate' | 'reactivate') or status must be provided" }
+  )
+  .transform((data) => {
+    if (data.action === "deactivate") return { status: "INACTIVE" as const, action: "deactivate" as const };
+    if (data.action === "reactivate") return { status: "ACTIVE" as const, action: "reactivate" as const };
+    const status = data.status!;
+    const action = status === "ACTIVE" ? ("reactivate" as const) : ("deactivate" as const);
+    return { status, action };
+  });
+
+export const UpdateChargerStatusSchema = z
+  .object({
+    action: z.enum(["deactivate", "reactivate", "set_status"]).optional(),
+    status: z.enum(["AVAILABLE", "IN_USE", "FAULTY", "INACTIVE"]).optional(),
+  })
+  .refine(
+    (data) => Boolean(data.action || data.status),
+    { message: "Either action ('deactivate' | 'reactivate') or status must be provided" }
+  )
+  .transform((data) => {
+    if (data.action === "deactivate") return { status: "INACTIVE" as const, action: "deactivate" as const };
+    if (data.action === "reactivate") return { status: "AVAILABLE" as const, action: "reactivate" as const };
+    const status = data.status!;
+    const action = status === "INACTIVE" ? ("deactivate" as const) : ("reactivate" as const);
+    return { status, action };
+  });
+
+export const EntityIdParamSchema = z.coerce
+  .number()
+  .int("Entity ID must be an integer")
+  .positive("Entity ID must be positive");
+

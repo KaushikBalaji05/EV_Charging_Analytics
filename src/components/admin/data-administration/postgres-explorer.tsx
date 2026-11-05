@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { ALLOWED_PG_TABLES, TableColumnMetadata } from "@/lib/types/data-admin";
 import { TableShell, td, th } from "@/components/dashboard/tables";
+import { StatusBadge } from "@/components/dashboard/status-badge";
+import { EntityActionModal } from "@/components/admin/data-administration/entity-action-modal";
 
 export function PostgresExplorer() {
   const [selectedTable, setSelectedTable] = useState<string>("charging_station");
@@ -16,6 +18,21 @@ export function PostgresExplorer() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
+
+  // Modal State for Station & Charger Management
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    mode: "deactivate" | "reactivate" | "delete" | "details" | null;
+    entityType: "charging_station" | "charger";
+    entity: Record<string, unknown> | null;
+  }>({
+    isOpen: false,
+    mode: null,
+    entityType: "charging_station",
+    entity: null,
+  });
 
   useEffect(() => {
     let active = true;
@@ -54,11 +71,17 @@ export function PostgresExplorer() {
     return () => {
       active = false;
     };
-  }, [selectedTable, page, limit, search, sortBy, sortOrder]);
+  }, [selectedTable, page, limit, search, sortBy, sortOrder, refreshTrigger]);
+
+  // Auto-dismiss success notification after 6 seconds
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = setTimeout(() => setSuccessMessage(null), 6000);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
 
   // Handle table switch: reset page and sort
   const handleTableChange = (newTable: string) => {
-    setIsLoading(true);
     setSelectedTable(newTable);
     setPage(1);
     setSearch("");
@@ -67,7 +90,6 @@ export function PostgresExplorer() {
 
   // Handle sort click
   const handleSort = (colName: string) => {
-    setIsLoading(true);
     if (sortBy === colName) {
       setSortOrder(sortOrder === "asc" ? "desc" : "asc");
     } else {
@@ -97,6 +119,25 @@ export function PostgresExplorer() {
     document.body.removeChild(a);
   };
 
+  const isManageableTable = selectedTable === "charging_station" || selectedTable === "charger";
+
+  const openActionModal = (
+    mode: "deactivate" | "reactivate" | "delete" | "details",
+    entity: Record<string, unknown>
+  ) => {
+    setModalState({
+      isOpen: true,
+      mode,
+      entityType: selectedTable === "charging_station" ? "charging_station" : "charger",
+      entity,
+    });
+  };
+
+  const handleModalSuccess = (msg: string) => {
+    setSuccessMessage(msg);
+    setRefreshTrigger((prev) => prev + 1);
+  };
+
   const totalPages = Math.ceil(totalCount / limit) || 1;
 
   return (
@@ -117,6 +158,7 @@ export function PostgresExplorer() {
               {ALLOWED_PG_TABLES.map((tbl) => (
                 <option key={tbl} value={tbl}>
                   {tbl} {tbl.startsWith("v_") ? "(View)" : ""}
+                  {tbl === "charging_station" || tbl === "charger" ? " ★ (Deactivation & Deletion Enabled)" : ""}
                 </option>
               ))}
             </select>
@@ -154,6 +196,23 @@ export function PostgresExplorer() {
           </button>
         </div>
       </div>
+
+      {/* Success Notification Banner */}
+      {successMessage && (
+        <div className="rounded border border-emerald-400/40 bg-emerald-500/10 p-3 text-xs text-emerald-800 font-medium flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>✓</span>
+            <span>{successMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Column Schema Badges */}
       {columns.length > 0 && (
@@ -216,30 +275,109 @@ export function PostgresExplorer() {
                     </th>
                   );
                 })}
+                {isManageableTable && (
+                  <th className={`${th} text-right min-w-[14rem]`}>
+                    Management Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-rule/50 text-xs font-mono">
-              {rows.map((row, idx) => (
-                <tr key={idx} className="hover:bg-paper/40 transition">
-                  {columns.map((col) => {
-                    const val = row[col.name];
-                    const displayVal =
-                      val === null || val === undefined
-                        ? <span className="text-muted/60 italic">null</span>
-                        : typeof val === "object"
-                        ? JSON.stringify(val)
-                        : String(val);
+              {rows.map((row, idx) => {
+                const statusValue =
+                  selectedTable === "charging_station"
+                    ? String(row.operating_status ?? "")
+                    : selectedTable === "charger"
+                    ? String(row.status ?? "")
+                    : "";
 
-                    return (
-                      <td key={col.name} className={td}>
-                        <span className="truncate max-w-[16rem] block" title={String(val)}>
-                          {displayVal}
-                        </span>
+                const isStation = selectedTable === "charging_station";
+                const isDeactivated = isStation
+                  ? statusValue === "INACTIVE"
+                  : statusValue === "INACTIVE";
+
+                return (
+                  <tr key={idx} className="hover:bg-paper/40 transition">
+                    {columns.map((col) => {
+                      const val = row[col.name];
+
+                      // Render status as a badge if column represents entity status
+                      if (
+                        (col.name === "operating_status" && selectedTable === "charging_station") ||
+                        (col.name === "status" && selectedTable === "charger")
+                      ) {
+                        return (
+                          <td key={col.name} className={td}>
+                            <StatusBadge status={String(val)} />
+                          </td>
+                        );
+                      }
+
+                      const displayVal =
+                        val === null || val === undefined ? (
+                          <span className="text-muted/60 italic">null</span>
+                        ) : typeof val === "object" ? (
+                          JSON.stringify(val)
+                        ) : (
+                          String(val)
+                        );
+
+                      return (
+                        <td key={col.name} className={td}>
+                          <span className="truncate max-w-[16rem] block" title={String(val)}>
+                            {displayVal}
+                          </span>
+                        </td>
+                      );
+                    })}
+
+                    {/* Integrated Management Actions for Stations & Chargers */}
+                    {isManageableTable && (
+                      <td className={`${td} text-right whitespace-nowrap`}>
+                        <div className="inline-flex items-center gap-1.5 font-sans">
+                          {isDeactivated ? (
+                            <button
+                              type="button"
+                              onClick={() => openActionModal("reactivate", row)}
+                              title="Reactivate this record"
+                              className="rounded px-2 py-0.5 text-[11px] font-semibold border border-emerald-500/40 bg-emerald-500/10 text-emerald-800 hover:bg-emerald-500/20 transition"
+                            >
+                              Reactivate
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => openActionModal("deactivate", row)}
+                              title="Safely deactivate this record while preserving historical data"
+                              className="rounded px-2 py-0.5 text-[11px] font-semibold border border-amber-500/40 bg-amber-500/10 text-amber-800 hover:bg-amber-500/20 transition"
+                            >
+                              Deactivate
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => openActionModal("delete", row)}
+                            title="Inspect dependencies and evaluate safe permanent deletion"
+                            className="rounded px-2 py-0.5 text-[11px] font-semibold border border-rose-500/40 bg-rose-500/10 text-rose-800 hover:bg-rose-500/20 transition"
+                          >
+                            Delete
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openActionModal("details", row)}
+                            title="View full record details and relational dependencies"
+                            className="rounded px-2 py-0.5 text-[11px] font-medium border border-rule bg-paper text-ink hover:bg-rule/40 transition"
+                          >
+                            Details
+                          </button>
+                        </div>
                       </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </TableShell>
         )}
@@ -288,6 +426,17 @@ export function PostgresExplorer() {
           </div>
         </div>
       </div>
+
+      {/* Modal Dialog */}
+      <EntityActionModal
+        key={`${modalState.entityType}-${modalState.entity ? String(modalState.entity.station_id ?? modalState.entity.charger_id) : "none"}-${modalState.mode}`}
+        isOpen={modalState.isOpen}
+        mode={modalState.mode}
+        entityType={modalState.entityType}
+        entity={modalState.entity}
+        onClose={() => setModalState((prev) => ({ ...prev, isOpen: false, entity: null }))}
+        onSuccess={handleModalSuccess}
+      />
     </div>
   );
 }

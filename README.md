@@ -345,6 +345,12 @@ All Data Administration endpoints enforce session authentication, CSRF origin ve
 | `/api/admin/data/telemetry/live` | `GET` | Admin | Returns latest electrical readings per station and chronological trend buffer for charts. |
 | `/api/admin/data/options` | `GET` | Admin | Returns active stations, installed chargers, and EVs for controlled form dropdowns. |
 | `/api/admin/data/stations` | `POST` | Admin | Validates and inserts a new charging station record into `charging_station`. |
+| `/api/admin/data/stations/[id]` | `GET` | Admin | Evaluates station dependencies (chargers, sessions, capacity, telemetry) and returns deletion eligibility. |
+| `/api/admin/data/stations/[id]` | `PATCH` | Admin | Deactivates (`INACTIVE`) or reactivates (`ACTIVE`) a charging station. |
+| `/api/admin/data/stations/[id]` | `DELETE` | Admin | Safely deletes a station only if zero dependent records exist. Returns HTTP 409 if dependencies exist. |
+| `/api/admin/data/chargers/[id]` | `GET` | Admin | Evaluates charger dependencies (sessions) and returns deletion eligibility. |
+| `/api/admin/data/chargers/[id]` | `PATCH` | Admin | Deactivates (`INACTIVE`) or reactivates (`AVAILABLE`) an individual charger. |
+| `/api/admin/data/chargers/[id]` | `DELETE` | Admin | Safely deletes an individual charger only if zero dependent charging sessions exist. |
 | `/api/admin/data/sessions` | `POST` | Admin | Validates and inserts a verified charging session into `charging_session`. |
 
 ---
@@ -382,6 +388,22 @@ Stage 8 provides a comprehensive overhaul across the user experience, applicatio
    - Graceful shutdown handlers for `SIGINT` and `SIGTERM` providing operator-friendly log notices and safe connection teardown.
    - Web UI log viewer with automatic ANSI escape code stripping for clean diagnostics.
 
+5. **Safe Charging Station & Charger Deletion and Deactivation**:
+   - **Station Management**:
+     - **Deactivation**: Changes `operating_status` to `'INACTIVE'`. Preserves all historical charging sessions, revenue analytics, and grid telemetry records intact. Deactivated stations remain visible in PostgreSQL Explorer with their inactive badge and can be safely reactivated back to `'ACTIVE'`.
+     - **Permanent Deletion Guard**: Before deletion, the system performs a multi-table dependency check verifying whether dependent records exist in `charger`, `charging_session`, `station_capacity`, or `grid_telemetry`. If any dependent records exist, permanent deletion is strictly blocked with HTTP 409 Conflict, and deactivation is recommended. Permanent deletion is permitted only when zero dependent records exist, executed inside a transaction with row-level locks (`SELECT ... FOR UPDATE`) to prevent race conditions.
+   - **Charger Management**:
+     - **Deactivation**: Changes charger `status` to `'INACTIVE'`. Historical charging sessions are preserved completely. Deactivated chargers can be reactivated back to `'AVAILABLE'`.
+     - **Permanent Deletion Guard**: Blocks deletion if any historical charging sessions exist for the charger (HTTP 409 Conflict). Permitted only when zero sessions exist.
+   - **Session Creation Prevention**:
+     - Inactive stations and chargers are flagged and disabled in session creation dropdowns.
+     - Backend query validation in `insertChargingSession` strictly rejects session insertions if the station is not `'ACTIVE'` or the charger is `'INACTIVE'`/`'FAULTY'`.
+   - **Admin Authorization & Activity Logging**:
+     - Dedicated endpoints (`/api/admin/data/stations/[id]` and `/api/admin/data/chargers/[id]`) enforce `ADMIN` role-based access control, CSRF origin checks, and Zod parameter validation.
+     - All administrative actions (deactivations, reactivations, permanent deletions) are recorded with timestamp, admin ID, entity type, entity ID, and status change details in `admin_activity_log` and structured server logs.
+   - **Zero Cascading Deletes**:
+     - Foreign-key constraints are strictly maintained with no cascading deletes on historical business records.
+
 ---
 
 ## Automated Checks & Testing
@@ -404,7 +426,7 @@ npm run build
 
 ### Verified Test Results
 
-- **Vitest**: **308 tests passing across 15 test files** (unit tests, query integration tests, authentication tests, MongoDB integration tests, Stage 7 reliability, and Stage 8 system revamp test suites).
+- **Vitest**: Comprehensive automated test suite across 16 test files (unit tests, query integration tests, authentication tests, MongoDB integration tests, Stage 7 reliability, Stage 8 revamp, and Stage 8 safe deletion & deactivation suites).
 - **TypeScript**: Passed with 0 errors (`tsc --noEmit`).
 - **ESLint**: Passed with 0 warnings or errors.
 - **Production Build**: Successfully compiled 34 routes with Partial Prerendering.

@@ -7,6 +7,7 @@ export const ALLOWED_PG_TABLES = [
   "charging_session",
   "grid_telemetry",
   "station_capacity",
+  "admin_activity_log",
   "app_user",
   "auth_session",
   "v_overload_events",
@@ -115,4 +116,36 @@ export interface EvOptionItem {
   registrationNo: string;
   model: string;
   batteryCapacityKwh: number;
+}
+
+export interface StationDependencies {
+  stationId: number;
+  stationName: string;
+  location: string;
+  totalCapacityKw: number;
+  operatingStatus: string;
+  dependencies: {
+    chargers: number;
+    sessions: number;
+    capacitySnapshots: number;
+    telemetryReadings: number;
+    totalDependencies: number;
+  };
+  canDelete: boolean;
+  recommendation: "delete" | "deactivate";
+}
+
+export interface ChargerDependencies {
+  chargerId: number;
+  stationId: number;
+  stationName: string;
+  chargerType: string;
+  ratedPowerKw: number;
+  status: string;
+  dependencies: {
+    sessions: number;
+    totalDependencies: number;
+  };
+  canDelete: boolean;
+  recommendation: "delete" | "deactivate";
 }

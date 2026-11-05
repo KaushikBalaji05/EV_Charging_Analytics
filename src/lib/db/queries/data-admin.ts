@@ -637,13 +637,36 @@ export interface InsertSessionInput {
 export async function insertChargingSession(input: InsertSessionInput): Promise<{ sessionId: number }> {
   const { station_id, charger_id, ev_id, start_time, end_time, energy_kwh, peak_power_kw, cost } = input;
 
-  // Validate that charger belongs to the selected station
-  const chargerCheck = await query<{ charger_id: number }>(
-    `SELECT charger_id FROM charger WHERE charger_id = $1 AND station_id = $2`,
+  // Validate station exists and is active
+  const stationCheck = await query<{ operating_status: string }>(
+    `SELECT operating_status FROM charging_station WHERE station_id = $1`,
+    [station_id]
+  );
+  if (stationCheck.length === 0) {
+    throw new ApiError(404, "STATION_NOT_FOUND", `Station #${station_id} does not exist.`);
+  }
+  if (stationCheck[0].operating_status !== "ACTIVE") {
+    throw new ApiError(
+      400,
+      "INACTIVE_STATION",
+      `Cannot record session: Station #${station_id} is currently ${stationCheck[0].operating_status}. Sessions can only be created at ACTIVE stations.`
+    );
+  }
+
+  // Validate that charger belongs to the selected station and is available
+  const chargerCheck = await query<{ charger_id: number; status: string }>(
+    `SELECT charger_id, status FROM charger WHERE charger_id = $1 AND station_id = $2`,
     [charger_id, station_id]
   );
   if (chargerCheck.length === 0) {
     throw new ApiError(400, "INVALID_CHARGER", `Charger #${charger_id} does not belong to Station #${station_id}.`);
+  }
+  if (chargerCheck[0].status === "INACTIVE" || chargerCheck[0].status === "FAULTY") {
+    throw new ApiError(
+      400,
+      "INACTIVE_CHARGER",
+      `Cannot record session: Charger #${charger_id} is currently ${chargerCheck[0].status}. Sessions cannot be created for inactive or faulty chargers.`
+    );
   }
 
   // Validate that EV exists

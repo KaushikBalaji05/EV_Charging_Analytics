@@ -46,6 +46,10 @@ export function DataEntryForms({ onSuccess }: DataEntryFormsProps) {
   const availableChargers = options.chargers.filter(
     (c) => String(c.stationId) === selectedStationId
   );
+  const currentStation = options.stations.find((st) => String(st.stationId) === selectedStationId);
+  const isStationInactive = currentStation ? currentStation.status !== "ACTIVE" : false;
+  const currentCharger = availableChargers.find((c) => String(c.chargerId) === selectedChargerId);
+  const isChargerInactive = currentCharger ? (currentCharger.status === "INACTIVE" || currentCharger.status === "FAULTY") : false;
 
   const fetchOptions = async () => {
     try {
@@ -69,10 +73,12 @@ export function DataEntryForms({ onSuccess }: DataEntryFormsProps) {
           if (!active) return;
           setOptions(json.data);
           if (json.data.stations.length > 0) {
-            const firstStId = String(json.data.stations[0].stationId);
+            const firstActive = json.data.stations.find((st: StationOptionItem) => st.status === "ACTIVE") || json.data.stations[0];
+            const firstStId = String(firstActive.stationId);
             setSelectedStationId(firstStId);
-            const matching = json.data.chargers.filter((c: ChargerOptionItem) => String(c.stationId) === firstStId);
-            if (matching[0]) setSelectedChargerId(String(matching[0].chargerId));
+            const matching = json.data.chargers.filter((c: ChargerOptionItem) => String(c.stationId) === firstStId && c.status !== "INACTIVE" && c.status !== "FAULTY");
+            const firstCharger = matching[0] || json.data.chargers.find((c: ChargerOptionItem) => String(c.stationId) === firstStId);
+            if (firstCharger) setSelectedChargerId(String(firstCharger.chargerId));
           }
           if (json.data.evs.length > 0) {
             setSelectedEvId(String(json.data.evs[0].evId));
@@ -94,8 +100,11 @@ export function DataEntryForms({ onSuccess }: DataEntryFormsProps) {
 
   const handleStationChange = (newStationId: string) => {
     setSelectedStationId(newStationId);
-    const matching = options.chargers.filter((c) => String(c.stationId) === newStationId);
-    setSelectedChargerId(matching[0] ? String(matching[0].chargerId) : "");
+    const matching = options.chargers.filter(
+      (c) => String(c.stationId) === newStationId && c.status !== "INACTIVE" && c.status !== "FAULTY"
+    );
+    const fallback = options.chargers.find((c) => String(c.stationId) === newStationId);
+    setSelectedChargerId(matching[0] ? String(matching[0].chargerId) : fallback ? String(fallback.chargerId) : "");
   };
 
   // Handle Station Submit
@@ -340,12 +349,20 @@ export function DataEntryForms({ onSuccess }: DataEntryFormsProps) {
                 disabled={isLoadingOptions}
                 className="mt-1 w-full rounded border border-rule bg-paper px-3 py-1.5 text-xs text-ink focus:border-charge focus:outline-none"
               >
-                {options.stations.map((st) => (
-                  <option key={st.stationId} value={st.stationId}>
-                    #{st.stationId}: {st.stationName} ({st.totalCapacityKw} kW)
-                  </option>
-                ))}
+                {options.stations.map((st) => {
+                  const isInactive = st.status !== "ACTIVE";
+                  return (
+                    <option key={st.stationId} value={st.stationId} disabled={isInactive}>
+                      #{st.stationId}: {st.stationName} ({st.totalCapacityKw} kW) {isInactive ? `[${st.status} - Inactive]` : ""}
+                    </option>
+                  );
+                })}
               </select>
+              {isStationInactive && (
+                <p className="mt-1 text-[11px] font-medium text-rose-500">
+                  ⚠️ This station is deactivated. New sessions cannot be created here.
+                </p>
+              )}
             </div>
 
             <div>
@@ -356,19 +373,27 @@ export function DataEntryForms({ onSuccess }: DataEntryFormsProps) {
                 id="sess-charger"
                 value={selectedChargerId}
                 onChange={(e) => setSelectedChargerId(e.target.value)}
-                disabled={availableChargers.length === 0}
+                disabled={availableChargers.length === 0 || isStationInactive}
                 className="mt-1 w-full rounded border border-rule bg-paper px-3 py-1.5 text-xs text-ink focus:border-charge focus:outline-none"
               >
                 {availableChargers.length === 0 ? (
                   <option value="">No chargers installed for this station</option>
                 ) : (
-                  availableChargers.map((ch) => (
-                    <option key={ch.chargerId} value={ch.chargerId}>
-                      Charger #{ch.chargerId} ({ch.chargerType} · {ch.ratedPowerKw} kW)
-                    </option>
-                  ))
+                  availableChargers.map((ch) => {
+                    const isUnavailable = ch.status === "INACTIVE" || ch.status === "FAULTY";
+                    return (
+                      <option key={ch.chargerId} value={ch.chargerId} disabled={isUnavailable}>
+                        Charger #{ch.chargerId} ({ch.chargerType} · {ch.ratedPowerKw} kW) {isUnavailable ? `[${ch.status} - Unavailable]` : `(${ch.status})`}
+                      </option>
+                    );
+                  })
                 )}
               </select>
+              {isChargerInactive && (
+                <p className="mt-1 text-[11px] font-medium text-rose-500">
+                  ⚠️ This charger is {currentCharger?.status}. Cannot record sessions on inactive/faulty chargers.
+                </p>
+              )}
             </div>
 
             <div>
@@ -468,7 +493,7 @@ export function DataEntryForms({ onSuccess }: DataEntryFormsProps) {
           <div className="pt-2 flex justify-end">
             <button
               type="submit"
-              disabled={isSubmitting || !selectedChargerId || !startTime}
+              disabled={isSubmitting || !selectedChargerId || !startTime || isStationInactive || isChargerInactive}
               className="rounded bg-charge px-4 py-2 text-xs font-semibold text-white transition hover:bg-charge/90 disabled:opacity-50"
             >
               {isSubmitting ? "Recording Session..." : "Insert Charging Session"}

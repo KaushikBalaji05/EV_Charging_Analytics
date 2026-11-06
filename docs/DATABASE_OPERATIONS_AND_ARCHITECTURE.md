@@ -841,3 +841,98 @@ The application unifies PostgreSQL relational integrity with MongoDB streaming t
 1. **Station ID as Common Key**: The relational primary key `charging_station.station_id` is stored as an integer attribute `station_id` in every MongoDB telemetry document.
 2. **Automated Discovery**: The telemetry simulator dynamically queries PostgreSQL on startup (`SELECT station_id, station_name, total_capacity_kw FROM charging_station WHERE operating_status = 'ACTIVE'`). When a new station is created via the UI, the simulator automatically detects it and begins streaming electrical readings for it.
 3. **No Cross-Database Foreign Key Overhead**: Decoupling the high-velocity telemetry collection from relational constraints ensures maximum ingestion velocity while maintaining strict relational integrity for financial charging sessions and user permissions.
+
+
+---
+
+## Part 6: Real Live Data vs. Simulated Data — Roles & Processing Pipeline
+
+### 1. The Distinction: What Is Real vs. What Is Simulated?
+
+In a production utility grid, physical EV fast chargers (50 kW–240 kW) have embedded current transformers (CTs), digital power meters, and OCPP (Open Charge Point Protocol) gateways streaming telemetry to backends. In a lab/evaluation environment, physical megawatt grid connections are not connected to the local development machine. 
+
+To bridge this gap while preserving technical authenticity, this platform uses a **hybrid real-and-simulated data strategy**:
+
+```
++───────────────────────────────────────────────────────────────────────────────────────────────────+
+|                                    DATA SOURCE CLASSIFICATION                                     |
++───────────────────────────────────────────────────────────────────────────────────────────────────+
+
+  REAL EXTERNAL & RELATIONAL DATA                         SIMULATED SENSOR DATA
+  ───────────────────────────────                         ─────────────────────
+  1. Central Electricity Authority (CEA) API              1. Instantaneous Electrical Telemetry
+     - Live Karnataka grid demand met (MW)                   - 3-Phase AC voltage (360V–440V RMS)
+     - Regional peak demand & grid frequency                 - Phase current draw (Amperes)
+     - Real-world baseline for regional grid health          - Instantaneous charging power (kW)
+                                                             - Local transformer load (kW)
+  2. Open Charge Map (OCM) Verified Metadata                 - Frequency micro-fluctuations (Hz)
+     - Real Bengaluru GPS coordinates (lat/lng)
+     - Real hub addresses (Indiranagar, Whitefield, etc.)  2. Purpose & Academic Justification
+     - Verified connector types (CCS-2, Type 2, GB/T)       - Replaces missing physical 150 kW hardware
+                                                             - Follows rigorous AC electrical equations
+  3. PostgreSQL Relational State                             - Stamped with source: "simulated"
+     - Real vehicle battery capacities (30–80 kWh)
+     - Transactional billing sessions in INR (₹)
+     - Administrative users & Argon2id security
+```
+
+---
+
+### 2. How Each Data Type Is Used
+
+| Data Stream | Storage / Origin | Update Cadence | Primary Use Case in Application |
+|---|---|---|---|
+| **Regional Grid Data (Real)** | CEA Public API / REST | On Page Request (Cached) | Informs station operators whether the broader Karnataka regional grid is currently stressed, normal, or in a power shortage. |
+| **Geographic Metadata (Real)** | Curated Registry (`external-metadata.ts`) | Static / Seeded | Maps station hubs to real physical infrastructure in Bengaluru with accurate connector compatibility and location tags. |
+| **Transactional Sessions (Real Logic)** | PostgreSQL (`charging_session`) | Transactional / Event-Driven | Tracks completed vehicle charging sessions, energy delivered (kWh), duration, and financial revenue (₹). |
+| **Capacity Snapshots (Relational)** | PostgreSQL (`station_capacity`) | Transactional / Batch | Tracks hourly capacity utilization (%) and evaluates transformer overload conditions via PL/pgSQL triggers. |
+| **High-Speed Sensor Telemetry (Simulated)** | MongoDB (`grid_telemetry`) | 5 Seconds Continuous | Powers real-time operational monitors, live voltage sag detection, instantaneous transformer loading, and line waveform charts. |
+
+---
+
+### 3. End-to-End Processing Pipeline
+
+The system processes real and simulated data through four distinct pipeline stages:
+
+```
++---------------------------------------------------------------------------------------------------+
+|                                     DATA PROCESSING PIPELINE                                      |
++---------------------------------------------------------------------------------------------------+
+
+ [STAGE 1: GENERATION & INGESTION]
+   Real Relational Discovery:
+   - Daemon queries PostgreSQL: SELECT station_id, total_capacity_kw FROM charging_station WHERE status='ACTIVE'
+   Simulated Physics Engine:
+   - Computes diurnal demand ratio for hour h: base + morning_peak + evening_peak
+   - Derives voltage sag: V_drop = (load_ratio - 0.4) * 8.0V
+   - Computes 3-phase current: I = (P * 1000) / (sqrt(3) * V * pf)
+   - Stems overload flag if grid_load_kw > station_capacity
+   - Bulk writes batch into MongoDB collection grid_telemetry via insertMany()
+
+ [STAGE 2: DATABASE-LEVEL PROCESSING]
+   PostgreSQL Engine:
+   - Triggers (fn_station_capacity_compute) intercept capacity inserts and compute exact utilization %
+   - Views (v_session_details) join 4 tables and calculate charging session durations
+   - Aggregations (v_daily_demand) calculate 7-day moving averages using SQL window frames
+   MongoDB Engine:
+   - $jsonSchema validation engine rejects malformed packets at write time
+   - Compound index (station_id: 1, recorded_at: -1) builds an in-memory B-Tree for O(log N) lookups
+
+ [STAGE 3: SERVER-SIDE DATA ACCESS & FETCHING]
+   Next.js Server Components / DAL:
+   - Queries PostgreSQL connection pool for session totals and station capacity limits
+   - Queries MongoDB collection for latest station telemetry readings
+   - Fetches CEA regional grid API with 2500ms timeout bounds and fallback context
+
+ [STAGE 4: UNIFIED HYBRID PRESENTATION]
+   Client Dashboard (HybridStationView):
+   - Merges all three layers into a single operator dashboard:
+     Card 1: PostgreSQL Relational State (Lifetime Energy, Total Revenue, Active Chargers)
+     Card 2: MongoDB Live Stream (Current kW Draw, Bus Voltage, Transformer Overload Badge)
+     Card 3: Real CEA Regional Grid (Statewide Demand Met, Regional Grid Health)
+```
+
+### 4. Key Takeaways for Project Evaluation
+1. **Truth in Data Lineage**: Simulated data is never masqueraded as hardware telemetry. It is strictly tagged with `source: "simulated"` and checked against schema validation rules.
+2. **Physical Fidelity**: The simulator does not emit random noise; it implements true three-phase AC electrical engineering formulas ($P = \sqrt{3}VI\cos\phi$, Ohm's law voltage drop, diurnal traffic distribution).
+3. **Decoupled Architecture**: High-speed simulated streams in MongoDB cannot saturate or slow down transactional PostgreSQL billing sessions and user authentication.

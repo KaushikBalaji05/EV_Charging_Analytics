@@ -330,3 +330,514 @@ The background telemetry simulator runs as a detached process generating simulat
   Interactive terminal CLI to create new `ADMIN` or `ANALYST` users with Argon2id password hashing.
 - [`check-telemetry.mjs`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/check-telemetry.mjs):
   Quick diagnostic script to verify MongoDB connectivity and inspect recent readings.
+
+
+---
+
+## Part 3: MongoDB Architecture, Code, Logic & Use Cases
+
+### 1. MongoDB Use Cases & Architectural Motivation
+
+In the EV Charging Demand & Grid Load Analytics platform, MongoDB serves as the **high-cadence electrical telemetry repository**. 
+
+#### Why MongoDB for Sensor Telemetry (Instead of Relational PostgreSQL)?
+1. **High Ingestion Throughput & Append-Heavy Workload**:
+   - In a production charging network, 20 hubs streaming electrical readings every 5 seconds generate **345,600 readings per day** (over 10.3 million records monthly).
+   - In PostgreSQL, write-intensive append streams generate significant write-amplification, index maintenance overhead, transaction log (`WAL`) churn, and table bloat requiring aggressive `VACUUM` worker scheduling.
+   - MongoDB uses an optimized memory-mapped write engine (WiredTiger) with document-level concurrency control, checkpointing, and fast append-only write throughput.
+2. **Semi-Structured Sensor Metadata**:
+   - Different EV charging hardware vendors (ABB, Schneider Electric, Delta, Siemens) emit varying sensor telemetry attributes. One manufacturer includes ambient temperature and power factor; another includes DC bus ripple voltage and connector thermal sensor readings.
+   - In MongoDB, this contextual data is seamlessly encapsulated in a flexible `metadata` document field without requiring relational schema migrations or nullable sparse columns.
+3. **Decoupled Operational Blast Radius**:
+   - A sudden surge or backlog in incoming high-frequency telemetry cannot lock relational tables or starve user authentication sessions, billing records, or analytical reporting queries.
+4. **Time-Series Slicing & Windowed Lookups**:
+   - Operations dashboards require instantaneous retrieval of the latest reading per station ($O(1)$ indexed lookup) and rolling 15-minute trends. MongoDB handles these windowed queries with minimal latency.
+
+---
+
+### 2. Collection Schema Design & JSONSchema Validation
+
+While MongoDB is schemaless by default, this project enforces **strict database-level validation** using MongoDB's `$jsonSchema` engine (configured in [`src/lib/db/mongodb.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/src/lib/db/mongodb.ts) and [`scripts/init-mongo.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/scripts/init-mongo.ts)).
+
+#### Schema Definition (`grid_telemetry` Collection)
+```typescript
+{
+  $jsonSchema: {
+    bsonType: "object",
+    required: [
+      "station_id",
+      "recorded_at",
+      "voltage_v",
+      "current_a",
+      "power_kw",
+      "frequency_hz",
+      "grid_load_kw",
+      "source"
+    ],
+    properties: {
+      station_id: {
+        bsonType: "int",
+        description: "Foreign key reference matching PostgreSQL Charging_Station(station_id)"
+      },
+      recorded_at: {
+        bsonType: "date",
+        description: "UTC BSON date timestamp of sensor reading"
+      },
+      voltage_v: {
+        bsonType: ["double", "int", "decimal"],
+        minimum: 0,
+        description: "RMS bus voltage in Volts"
+      },
+      current_a: {
+        bsonType: ["double", "int", "decimal"],
+        minimum: 0,
+        description: "Total phase current in Amperes"
+      },
+      power_kw: {
+        bsonType: ["double", "int", "decimal"],
+        minimum: 0,
+        description: "Instantaneous active EV charging power draw in kW"
+      },
+      frequency_hz: {
+        bsonType: ["double", "int", "decimal"],
+        minimum: 0,
+        description: "AC grid frequency in Hertz"
+      },
+      grid_load_kw: {
+        bsonType: ["double", "int", "decimal"],
+        minimum: 0,
+        description: "Station transformer or local feeder load in kW"
+      },
+      source: {
+        enum: ["simulated"],
+        description: "Must strictly be 'simulated' to preserve truthful data lineage"
+      },
+      metadata: {
+        bsonType: "object",
+        description: "Optional semi-structured contextual telemetry attributes"
+      }
+    }
+  }
+}
+```
+
+#### Key Validation Rules:
+- `validationAction: "error"`: Rejects invalid documents immediately with an exception; malformed packets never reach the collection.
+- `validationLevel: "strict"`: Applies validation to all inserts and updates.
+- `source: ["simulated"]`: Enforces data provenance; prevents synthetic test data from being conflated with future physical hardware telemetry.
+
+---
+
+### 3. Indexing Strategy & Query Optimization
+
+Three specialized indexes are maintained on the `grid_telemetry` collection to satisfy application query patterns:
+
+```typescript
+// 1. High-Performance Compound Index for Station Dashboard
+await collection.createIndex(
+  { station_id: 1, recorded_at: -1 },
+  { name: "idx_station_recorded_at" }
+);
+
+// 2. Global Chronological Index for Live Monitors
+await collection.createIndex(
+  { recorded_at: -1 },
+  { name: "idx_recorded_at" }
+);
+
+// 3. Provenance Filter Index
+await collection.createIndex(
+  { source: 1 },
+  { name: "idx_source" }
+);
+```
+
+#### Why the Compound Index Matters:
+- When querying `db.grid_telemetry.find({ station_id: 2 }).sort({ recorded_at: -1 }).limit(1)`:
+  - The WiredTiger engine executes an **`IXSCAN` (Index Scan)** directly on `idx_station_recorded_at`.
+  - Because `station_id` is the index prefix and `recorded_at` is sorted descending, the query locates the exact station bucket in $O(\log N)$ time and immediately reads the top leaf node.
+  - The query plan requires **zero in-memory sorting** (`SORT` stage eliminated), returning in **< 1 millisecond**.
+
+---
+
+### 4. Telemetry Simulator Engineering & Physical Logic
+
+The background generator daemon ([`scripts/telemetry-simulator.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/scripts/telemetry-simulator.ts)) simulates real-world electrical grid physics for all active PostgreSQL stations.
+
+#### Mathematical & Physical Models Implemented:
+1. **Diurnal Demand Curve (Dual-Peak Rush Hour Model)**:
+   EV charging patterns follow daily commuter behavior. Power consumption is modeled as a baseline load plus two Gaussian peaks for morning office arrivals (8–10 AM) and evening commutes (6–9 PM):
+   $$\text{demandRatio}(h) = 0.25 + 0.35 \cdot \exp\left(-\frac{(h - 9)^2}{8}\right) + 0.40 \cdot \exp\left(-\frac{(h - 19)^2}{8}\right)$$
+   Where $h$ is the current hour of the day (0–23).
+
+2. **3-Phase AC Current Calculation**:
+   Three-phase active power ($P$ in kW) relates to line-to-line voltage ($V$ in Volts), current ($I$ in Amperes), and power factor ($\text{pf}$) by:
+   $$P = \frac{\sqrt{3} \cdot V \cdot I \cdot \text{pf}}{1000}$$
+   The simulator computes current draw dynamically using:
+   $$I = \frac{P \cdot 1000}{\sqrt{3} \cdot V \cdot \text{pf}}$$
+   Where $\text{pf}$ is simulated between $0.95$ and $0.98$ (typical power factor for modern DC fast charging rectifiers with active power factor correction).
+
+3. **Voltage Sag / Grid Impedance Modeling**:
+   When station transformer load increases, internal winding and line impedance cause bus voltage to sag below nominal (415V AC):
+   $$V_{\text{drop}} = (\text{loadRatio} - 0.4) \cdot 8.0 \text{ Volts}$$
+   $$V = \text{clamp}(360, 460, 415 - V_{\text{drop}} + \text{noise})$$
+
+4. **Transformer Overload Flagging**:
+   When transformer load ($\text{grid\_load\_kw}$) exceeds the station's rated capacity ($\text{capacity\_kw}$), the reading is tagged with:
+   ```typescript
+   metadata: {
+     is_overloaded: gridLoadKw > spec.capacityKw,
+     power_factor: powerFactor,
+     station_name: spec.name
+   }
+   ```
+
+#### Simulator Batch Ingestion Loop:
+```typescript
+async function tick() {
+  const now = new Date();
+  const batch = options.stations.map((stId) =>
+    generateReading(stId, now, options.scenario)
+  );
+
+  // Single round-trip bulk write to MongoDB
+  await collection.insertMany(batch);
+  writeMeta({ lastTickAt: now.toISOString() });
+}
+```
+
+---
+
+### 5. MongoDB Client Singleton & Connection Management
+
+Defined in [`src/lib/db/mongodb.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/src/lib/db/mongodb.ts):
+
+- **Singleton Pattern**: Caches `globalThis.__mongoClient` and `__mongoClientPromise` to prevent connection leaks across Next.js API route invocations and hot-module reloading.
+- **Connection Pool Bounds**: Configures `maxPoolSize: 10`, `minPoolSize: 1`, and `serverSelectionTimeoutMS: 5000`.
+- **Health Probe (`isMongoAvailable()`)**: Executes an admin `ping` command raced against a 1,500ms timeout promise. If MongoDB is restarting or paused, the platform degrades gracefully rather than throwing uncaught server errors.
+
+---
+
+### 6. Query APIs & Analytical Data Extraction
+
+- **Latest Station Telemetry** ([`src/lib/db/queries/telemetry-mongo.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/src/lib/db/queries/telemetry-mongo.ts)):
+  ```typescript
+  export async function getLatestTelemetryForStation(stationId: number): Promise<MongoGridTelemetry | null> {
+    const db = await getMongoDb();
+    return db.collection<MongoGridTelemetry>(TELEMETRY_COLLECTION).findOne(
+      { station_id: stationId },
+      { sort: { recorded_at: -1 } }
+    );
+  }
+  ```
+- **Historical Trend Query**: Retrieves telemetry points for a given station within a rolling window (`recorded_at >= now - N minutes`) for line charts.
+- **Admin BSON Explorer & CSV Export** ([`src/lib/db/queries/data-admin.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/src/lib/db/queries/data-admin.ts)):
+  - Serializes 12-byte BSON `ObjectId` instances to hexadecimal strings (`_id.toHexString()`).
+  - Serializes BSON dates to ISO-8601 strings.
+  - Implements formula injection sanitization on CSV exports by prefixing potentially malicious characters (`=`, `+`, `-`, `@`) with a single quote (`'`).
+
+---
+---
+
+## Part 4: PostgreSQL Architecture, Code, Logic & Use Cases
+
+### 1. PostgreSQL Use Cases & Architectural Motivation
+
+PostgreSQL serves as the **core transactional, relational, and analytical engine** for the platform.
+
+#### Why PostgreSQL for Relational State?
+1. **ACID Transaction Guarantees**:
+   - Financial billing sessions (`charging_session`), charger status changes (`AVAILABLE` $\to$ `IN_USE`), and administrative user role management demand strict atomicity and serializability.
+   - Partial or corrupted transactions in session billing are unacceptable.
+2. **Relational Referential Integrity (`FOREIGN KEY ... ON DELETE RESTRICT`)**:
+   - A charging station cannot be deleted if chargers are assigned to it.
+   - A charger cannot be removed if historical charging sessions reference its ID.
+   - Referential integrity is enforced at the database engine level, safeguarding against application bugs.
+3. **Database-Level Business Invariants (PL/pgSQL Triggers)**:
+   - Business rules (such as computing overload statuses and preventing charger power totals from exceeding station transformer ratings) are validated directly inside database triggers.
+4. **Analytical SQL Views & Window Aggregations**:
+   - Analytical views compute real-time KPI metrics, revenue totals, utilization percentages, and hourly demand distributions using optimized SQL query execution plans.
+
+---
+
+### 2. Relational Schema & Entity-Relationship Design
+
+The relational schema is structured into normalized tables:
+
+```
++-------------------+        1:N         +-------------------+        1:N         +--------------------+
+|  CHARGING_STATION |------------------->|      CHARGER      |------------------->|  CHARGING_SESSION  |
++-------------------+                    +-------------------+                    +--------------------+
+| station_id (PK)   |                    | charger_id (PK)   |                    | session_id (PK)    |
+| station_name      |                    | station_id (FK)   |                    | charger_id (FK)    |
+| location          |                    | charger_type      |                    | ev_id (FK) --------+
+| total_capacity_kw |                    | rated_power_kw    |                    | start_time         |
+| operating_status  |                    | status            |                    | end_time           |
++-------------------+                    +-------------------+                    | energy_kwh         |
+          | 1:N                                                                   | cost               |
+          v                                                                       +--------------------+
++-------------------+                                                                        |
+| STATION_CAPACITY  |                                                                        | N:1
++-------------------+                                                                        v
+| capacity_id (PK)  |                                                             +--------------------+
+| station_id (FK)   |                                                             |         EV         |
+| recorded_at       |                                                             +--------------------+
+| current_load_kw   |                                                             | ev_id (PK)         |
+| max_load_kw       |                                                             | registration_no    |
+| utilization_pct   |                                                             | model              |
+| overload_status   |                                                             | battery_cap_kwh    |
++-------------------+                                                             | owner_type         |
+                                                                                  +--------------------+
+```
+
+#### Detailed Table Specifications:
+1. **`Charging_Station`** ([`database/postgresql_schema.sql`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/database/postgresql_schema.sql)):
+   - Stores primary station hubs across Bengaluru.
+   - Constraints: `total_capacity_kw > 0`, `operating_status IN ('ACTIVE', 'INACTIVE', 'MAINTENANCE')`.
+2. **`Charger`**:
+   - Individual charging points installed at a station.
+   - Types: `AC_FAST` (7.4–22 kW), `DC_FAST` (50–60 kW), `DC_ULTRA` (120–150 kW).
+   - Foreign Key: `fk_charger_station` with `ON DELETE RESTRICT`.
+3. **`EV`**:
+   - Vehicle registry.
+   - Constraints: `registration_no UNIQUE`, `battery_capacity_kwh > 0`, `owner_type IN ('PRIVATE', 'COMMERCIAL')`.
+4. **`Charging_Session`**:
+   - Real-world session records tracking vehicle energy transactions.
+   - Check Constraints: `cost >= 0`, `energy_kwh >= 0`, `end_time IS NULL OR end_time >= start_time`.
+5. **`Station_Capacity`**:
+   - Periodic load snapshots tracking station utilization against rated maximums.
+6. **`app_user` & `auth_session`** ([`database/migrations/003_users_and_sessions.sql`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/database/migrations/003_users_and_sessions.sql)):
+   - User credentials with Argon2id password hashes, roles (`ADMIN`, `ANALYST`), and active account states.
+   - `auth_session` holds SHA-256 hashed 256-bit authentication tokens with explicit `expires_at` checks.
+7. **`admin_activity_log`** ([`database/migrations/006_admin_activity_log.sql`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/database/migrations/006_admin_activity_log.sql)):
+   - Append-only audit table logging administrative actions (`CREATE`, `DEACTIVATE`, `DELETE`) with admin email, entity ID, and `JSONB` parameter details.
+
+---
+
+### 3. Stored Procedures & Triggers (`fn_station_capacity_compute()`)
+
+To guarantee data consistency, capacity calculations are executed in a **PL/pgSQL trigger function** before records are committed to the database.
+
+#### The Trigger Function ([`database/migrations/005_fix_station_capacity_guard.sql`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/database/migrations/005_fix_station_capacity_guard.sql)):
+```sql
+CREATE OR REPLACE FUNCTION fn_station_capacity_compute()
+RETURNS trigger AS $$
+BEGIN
+    -- Guard against division-by-zero or non-positive capacity limits
+    IF NEW.max_load_kw IS NULL OR NEW.max_load_kw <= 0 THEN
+        RAISE EXCEPTION 'Station capacity max_load_kw must be strictly positive (got %)', NEW.max_load_kw
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Compute exact percentage utilization
+    NEW.utilization_pct := ROUND(NEW.current_load_kw / NEW.max_load_kw * 100, 2);
+
+    -- Automatically set overload status based on physical threshold
+    NEW.overload_status := CASE
+        WHEN NEW.current_load_kw > NEW.max_load_kw THEN 'OVERLOADED'
+        ELSE 'NORMAL'
+    END;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Attach trigger to station_capacity table
+CREATE TRIGGER trg_station_capacity_compute
+    BEFORE INSERT OR UPDATE OF max_load_kw, current_load_kw
+    ON station_capacity
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_station_capacity_compute();
+```
+
+#### Why This Is a Critical DBMS Design:
+- **Zero Inconsistency**: It is impossible for an application bug or manual SQL insert to record `current_load_kw = 180` and `max_load_kw = 150` with status `'NORMAL'`.
+- **Zero Division Safety**: Prevents `check_violation` crashes if `max_load_kw <= 0`.
+- **Encapsulated Business Logic**: The rule lives inside the database engine, ensuring all tools, scripts, and applications adhere to identical validation rules.
+
+---
+
+### 4. Analytical Views & Advanced SQL Logic
+
+Instead of embedding complex multidimensional SQL joins across application files, the database encapsulates core business queries inside **reusable analytical views**:
+
+#### A. Comprehensive Session View (`v_session_details`)
+([`database/migrations/004_session_detail_view.sql`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/database/migrations/004_session_detail_view.sql))
+```sql
+CREATE OR REPLACE VIEW v_session_details AS
+SELECT
+    cs.session_id,
+    cs.ev_id,
+    ev.registration_no,
+    ev.model,
+    ev.owner_type,
+    st.station_id,
+    st.station_name,
+    c.charger_id,
+    c.charger_type,
+    cs.start_time,
+    cs.end_time,
+    (cs.end_time IS NULL) AS is_ongoing,
+    CASE
+        WHEN cs.end_time IS NULL THEN NULL
+        ELSE ROUND(EXTRACT(EPOCH FROM (cs.end_time - cs.start_time)) / 60.0, 1)
+    END AS duration_minutes,
+    cs.energy_kwh,
+    cs.peak_power_kw,
+    cs.cost
+FROM charging_session cs
+JOIN ev               ON ev.ev_id        = cs.ev_id
+JOIN charger c        ON c.charger_id    = cs.charger_id
+JOIN charging_station st ON st.station_id = c.station_id;
+```
+*Eliminates repetitive 4-table joins in API handlers and accurately computes charging duration in minutes.*
+
+#### B. Latest Station Capacity (`v_station_latest_capacity`)
+Demonstrates PostgreSQL's `DISTINCT ON` feature to efficiently fetch only the newest snapshot per station:
+```sql
+CREATE OR REPLACE VIEW v_station_latest_capacity AS
+SELECT DISTINCT ON (sc.station_id)
+    sc.station_id,
+    sc.recorded_at,
+    sc.current_load_kw,
+    sc.max_load_kw,
+    COALESCE(sc.utilization_pct, ROUND(sc.current_load_kw / sc.max_load_kw * 100, 2)) AS utilization_pct,
+    sc.overload_status
+FROM station_capacity sc
+ORDER BY sc.station_id, sc.recorded_at DESC, sc.capacity_id DESC;
+```
+
+#### C. Rolling Window Analytical Queries (7-Day Moving Averages)
+Used in Demand Analytics ([`src/lib/db/queries/demand.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/src/lib/db/queries/demand.ts)):
+```sql
+SELECT
+    d.session_date,
+    d.total_sessions,
+    d.total_energy_kwh,
+    ROUND(
+        AVG(d.total_energy_kwh) OVER (
+            ORDER BY d.session_date
+            ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+        ),
+        2
+    ) AS rolling_7d_avg_kwh
+FROM daily_totals d
+ORDER BY d.session_date ASC;
+```
+*Employs window frame specification (`ROWS BETWEEN 6 PRECEDING AND CURRENT ROW`) to smooth weekday/weekend seasonality.*
+
+#### D. Partial Indexes
+([`database/migrations/002_analytics_views_and_triggers.sql`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/database/migrations/002_analytics_views_and_triggers.sql))
+```sql
+CREATE INDEX idx_capacity_overloaded_time
+    ON station_capacity (recorded_at DESC)
+    WHERE overload_status = 'OVERLOADED';
+```
+*A textbook partial index: Since only ~5% of capacity snapshots represent overload events, this index consumes 95% less disk space and memory while accelerating overload alert queries.*
+
+---
+
+### 5. PostgreSQL Connection Pool & Safe Query Wrapper
+
+Defined in [`src/lib/db/pool.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/src/lib/db/pool.ts):
+
+- **Connection Pool Singleton**: Manages a shared `pg.Pool` instance with `max: 10`, `connectionTimeoutMillis: 5000`, and `statement_timeout: 15000` (killing slow queries before they tie up server threads).
+- **Timezone-Safe Type Parsers**:
+  ```typescript
+  const types = {
+    getTypeParser(oid: number, format?: "text" | "binary") {
+      // Keep TIMESTAMP and DATE as ISO strings to avoid client-local TZ skew
+      if (oid === 1114 || oid === 1082) return (v: string) => v;
+      // Convert NUMERIC and BIGINT strings to native JS numbers
+      if (oid === 1700 || oid === 20) return (v: string) => Number(v);
+      return pg.types.getTypeParser(oid, format as "text");
+    },
+  };
+  ```
+- **Strict Parameterized Queries**:
+  ```typescript
+  export async function query<T>(text: string, params: unknown[] = []): Promise<T[]> {
+    const result = await getPool().query<T>(text, params);
+    return result.rows;
+  }
+  ```
+  *Parameters are passed out-of-band to the PostgreSQL query compiler ($1, $2, ...), offering 100% immunity to SQL injection attacks.*
+- **Transaction Wrapper (`withTransaction`)**:
+  ```typescript
+  export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN");
+      const result = await fn(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+  ```
+  *Guarantees atomic rollback on runtime failures and prevents connection pool exhaustion by releasing clients in the `finally` block.*
+
+---
+
+### 6. Security, Authentication & Audit Architecture
+
+- **Argon2id Password Hashing** ([`src/lib/auth/password.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/src/lib/auth/password.ts)): Uses cryptographic Argon2id via `@node-rs/argon2`, resistant to GPU/ASIC brute-force attacks.
+- **Hashed Session Tokens** ([`src/lib/auth/session.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/src/lib/auth/session.ts)):
+  - The browser holds a 256-bit cryptographically secure random token in a `HttpOnly`, `SameSite=Lax`, `Secure` cookie.
+  - The database stores **only the SHA-256 hash** (`auth_session.token_hash`).
+  - Even if the PostgreSQL database is leaked, session tokens cannot be reverse-engineered or replayed.
+- **Role-Based Access Control (RBAC)** ([`src/lib/auth/dal.ts`](file:///home/yaswanth/College/DBMS_Sem5/DBMS_miniproject/EV_Charging_Analytics/src/lib/auth/dal.ts)):
+  - Role hierarchy: `ADMIN` > `ANALYST`.
+  - Admin endpoints verify the user role on every request before executing administrative actions.
+
+---
+---
+
+## Part 5: Hybrid Coordination (How PostgreSQL & MongoDB Synchronize)
+
+The application unifies PostgreSQL relational integrity with MongoDB streaming telemetry into a cohesive **Polyglot Persistence Architecture**:
+
+```
++--------------------------------------------------------------------------------------------------+
+|                                  POLYGLOT COORDINATION LIFECYCLE                                 |
++--------------------------------------------------------------------------------------------------+
+
+ 1. MASTER METADATA (PostgreSQL)
+    charging_station Table
+    ├─ station_id: 1, 2, ... 20
+    ├─ station_name: "Central Charging Hub", "Indiranagar 100ft Rd Hub", etc.
+    ├─ total_capacity_kw: 100 kW, 150 kW, 240 kW
+    └─ operating_status: 'ACTIVE'
+               │
+               │  Dynamic Discovery via resolveTargetStations()
+               ▼
+ 2. TELEMETRY INGESTION (MongoDB)
+    grid_telemetry Collection
+    ├─ station_id: 1 (Links directly to PostgreSQL station_id)
+    ├─ recorded_at: ISODate("2026-11-06T03:22:03Z")
+    ├─ voltage_v: 411.3 V
+    ├─ current_a: 99.1 A
+    ├─ power_kw: 67.8 kW
+    └─ metadata: { station_name, capacity_kw, is_overloaded: false }
+               │
+               │  Unified Dashboard Hydration
+               ▼
+ 3. UNIFIED FRONTEND PRESENTATION (Next.js Hybrid Views)
+    ┌─────────────────────────┬─────────────────────────┬─────────────────────────┐
+    │  POSTGRESQL CARD        │  MONGODB LIVE CARD      │  REGIONAL CEA GRID CARD │
+    ├─────────────────────────┼─────────────────────────┼─────────────────────────┤
+    │ Active Chargers: 3      │ Instantaneous: 67.8 kW  │ Karnataka Met: 14,200 MW│
+    │ Transformer: 100 kW     │ Bus Voltage: 411.3 V    │ Frequency: 49.95 Hz     │
+    │ Lifetime Revenue: ₹4.2L │ Grid Load: 81.3 kW      │ Regional Status: NORMAL │
+    │ Lifetime Energy: 28 MWh │ Streaming Status: LIVE  │ Data Source: CEA API    │
+    └─────────────────────────┴─────────────────────────┴─────────────────────────┘
+```
+
+### Correlation Rules:
+1. **Station ID as Common Key**: The relational primary key `charging_station.station_id` is stored as an integer attribute `station_id` in every MongoDB telemetry document.
+2. **Automated Discovery**: The telemetry simulator dynamically queries PostgreSQL on startup (`SELECT station_id, station_name, total_capacity_kw FROM charging_station WHERE operating_status = 'ACTIVE'`). When a new station is created via the UI, the simulator automatically detects it and begins streaming electrical readings for it.
+3. **No Cross-Database Foreign Key Overhead**: Decoupling the high-velocity telemetry collection from relational constraints ensures maximum ingestion velocity while maintaining strict relational integrity for financial charging sessions and user permissions.

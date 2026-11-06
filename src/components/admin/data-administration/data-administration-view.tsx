@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { DatabaseStatus, SimulatorInfo } from "@/lib/types/data-admin";
 import { DatabaseOverview } from "./database-overview";
@@ -29,23 +29,18 @@ export function DataAdministrationView({
   const pathname = usePathname();
 
   const tabParam = searchParams.get("tab") as AdminTab | null;
-  const initialTab = tabParam && VALID_TABS.includes(tabParam) ? tabParam : "overview";
+  const [localTab, setLocalTab] = useState<AdminTab>(
+    tabParam && VALID_TABS.includes(tabParam) ? tabParam : "overview",
+  );
+  const activeTab: AdminTab = tabParam && VALID_TABS.includes(tabParam) ? tabParam : localTab;
 
-  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
   const [postgres, setPostgres] = useState<DatabaseStatus>(initialPostgres);
   const [mongodb, setMongodb] = useState<DatabaseStatus>(initialMongodb);
   const [simulator, setSimulator] = useState<SimulatorInfo>(initialSimulator);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Sync state if URL changes externally (e.g. browser back/forward or direct link)
-  useEffect(() => {
-    if (tabParam && VALID_TABS.includes(tabParam) && tabParam !== activeTab) {
-      setActiveTab(tabParam);
-    }
-  }, [tabParam, activeTab]);
-
   const handleTabClick = (tabId: AdminTab) => {
-    setActiveTab(tabId);
+    setLocalTab(tabId);
     try {
       const newParams = new URLSearchParams(searchParams.toString());
       newParams.set("tab", tabId);

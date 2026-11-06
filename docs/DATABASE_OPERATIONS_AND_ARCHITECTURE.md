@@ -15,7 +15,21 @@ Here is how you can observe all operations across each layer.
 
 ---
 
-### 1. Built-in Application UI (No CLI needed)
+### 1. Terminal Live Stream Monitor (Best for Lab Presentations & Evaluators)
+
+Run the dedicated terminal monitor command from the project root:
+```bash
+npm run db:watch
+```
+
+**What it shows in real time (refreshes every 2 seconds):**
+- **MongoDB Telemetry Stream**: Document count ticking upward in real time (+20 documents every 5 seconds) as sensor batches are inserted, with live voltage, current, active power, frequency, and overload warnings.
+- **PostgreSQL Relational State**: Live row counts for stations, chargers, EVs, and sessions, plus the latest committed charging sessions and audit logs (`admin_activity_log`).
+- **Interactive Insertion Proof**: When you create a new station or charging session from the browser UI ([http://localhost:3000/data-administration?tab=entry](http://localhost:3000/data-administration?tab=entry)), it instantly appears in this terminal stream.
+
+---
+
+### 2. Built-in Application UI (No CLI needed)
 
 Sign in as Administrator (`yaswanthkalluri088@gmail.com`) and navigate to the **Data Administration** portal ([http://localhost:3000/data-administration](http://localhost:3000/data-administration)):
 
@@ -35,7 +49,7 @@ You can click any tab directly on the page, or use direct links:
 
 ---
 
-### 2. Observing PostgreSQL Operations via CLI
+### 3. Observing PostgreSQL Operations via CLI
 
 #### A. Watch Active Queries in Real Time
 To see active queries, executing connections, and wait states:
@@ -90,7 +104,7 @@ LIMIT 10;"
 
 ---
 
-### 3. Observing MongoDB Telemetry Operations
+### 4. Observing MongoDB Telemetry Operations
 
 #### A. Tail MongoDB Container Logs
 The MongoDB instance runs inside Docker (`ev-charging-mongo`). Tail all incoming operations, socket connections, and index operations:
@@ -134,7 +148,7 @@ db.system.profile.find().sort({ ts: -1 }).limit(10)
 
 ---
 
-### 4. Observing the Background Telemetry Daemon
+### 5. Observing the Background Telemetry Daemon
 
 The background telemetry simulator runs as a detached process generating simulated electrical data.
 

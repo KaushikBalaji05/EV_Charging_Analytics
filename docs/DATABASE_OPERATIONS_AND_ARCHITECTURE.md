@@ -17,18 +17,21 @@ Here is how you can observe all operations across each layer.
 
 ### 1. Built-in Application UI (No CLI needed)
 
-Sign in as Administrator (`yaswanthkalluri088@gmail.com`) and navigate to the **Data Administration** portal (`http://localhost:3000/data-administration`):
+Sign in as Administrator (`yaswanthkalluri088@gmail.com`) and navigate to the **Data Administration** portal ([http://localhost:3000/data-administration](http://localhost:3000/data-administration)):
 
-1. **Live Telemetry Monitor (`/data-administration` -> Tab: "Live Telemetry Monitor")**:
+You can click any tab directly on the page, or use direct links:
+1. **[Live Telemetry Monitor](http://localhost:3000/data-administration?tab=telemetry) (`?tab=telemetry`)**:
    - Displays real-time streaming status across all 20 stations.
    - Shows active voltage, current, active power, frequency, and transformer load.
    - Features a **Sanitized Simulator Logs drawer** that directly displays the output of the background telemetry daemon in real time.
-2. **Database Overview (`/data-administration` -> Tab: "Database Overview")**:
+2. **[Infrastructure Overview](http://localhost:3000/data-administration?tab=overview) (`?tab=overview`)**:
    - Live connection latency, operational table record counts, MongoDB collection sizes, and daemon status (PID, interval, uptime).
-3. **PostgreSQL Table Explorer (`/data-administration` -> Tab: "PostgreSQL Explorer")**:
+3. **[PostgreSQL Explorer](http://localhost:3000/data-administration?tab=postgres) (`?tab=postgres`)**:
    - View, search, sort, and export live records from any allowlisted table or analytical view (`charging_station`, `charger`, `ev`, `charging_session`, `station_capacity`, `v_station_metrics`, `admin_activity_log`, etc.).
-4. **MongoDB Explorer (`/data-administration` -> Tab: "MongoDB Explorer")**:
+4. **[MongoDB Explorer](http://localhost:3000/data-administration?tab=mongo) (`?tab=mongo`)**:
    - Inspect raw documents in `grid_telemetry`, inspect schema validation rules, filter by `station_id`, and export telemetry batches to CSV.
+5. **[Controlled Data Entry](http://localhost:3000/data-administration?tab=entry) (`?tab=entry`)**:
+   - Register new charging stations and charging sessions with real-time transactional validation.
 
 ---
 

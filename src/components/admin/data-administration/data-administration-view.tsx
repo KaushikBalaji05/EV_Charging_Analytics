@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { DatabaseStatus, SimulatorInfo } from "@/lib/types/data-admin";
 import { DatabaseOverview } from "./database-overview";
 import { PostgresExplorer } from "./postgres-explorer";
@@ -9,6 +10,8 @@ import { LiveTelemetryMonitor } from "./live-telemetry-monitor";
 import { DataEntryForms } from "./data-entry-forms";
 
 export type AdminTab = "overview" | "postgres" | "mongo" | "telemetry" | "entry";
+
+const VALID_TABS: AdminTab[] = ["overview", "postgres", "mongo", "telemetry", "entry"];
 
 interface DataAdministrationViewProps {
   initialPostgres: DatabaseStatus;
@@ -21,11 +24,36 @@ export function DataAdministrationView({
   initialMongodb,
   initialSimulator,
 }: DataAdministrationViewProps) {
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const tabParam = searchParams.get("tab") as AdminTab | null;
+  const initialTab = tabParam && VALID_TABS.includes(tabParam) ? tabParam : "overview";
+
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
   const [postgres, setPostgres] = useState<DatabaseStatus>(initialPostgres);
   const [mongodb, setMongodb] = useState<DatabaseStatus>(initialMongodb);
   const [simulator, setSimulator] = useState<SimulatorInfo>(initialSimulator);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Sync state if URL changes externally (e.g. browser back/forward or direct link)
+  useEffect(() => {
+    if (tabParam && VALID_TABS.includes(tabParam) && tabParam !== activeTab) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam, activeTab]);
+
+  const handleTabClick = (tabId: AdminTab) => {
+    setActiveTab(tabId);
+    try {
+      const newParams = new URLSearchParams(searchParams.toString());
+      newParams.set("tab", tabId);
+      router.replace(`${pathname}?${newParams.toString()}`, { scroll: false });
+    } catch {
+      // Fallback if router not yet ready
+    }
+  };
 
   const refreshOverview = useCallback(async () => {
     setIsRefreshing(true);
@@ -55,18 +83,20 @@ export function DataAdministrationView({
   return (
     <div className="space-y-6">
       {/* Tab Navigation */}
-      <div className="flex overflow-x-auto border-b border-rule bg-panel px-2 pt-2 rounded-t">
+      <div className="flex overflow-x-auto border-b border-rule bg-panel px-2 pt-2 rounded-t scrollbar-thin">
         {TABS.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id as AdminTab)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium transition border-b-2 whitespace-nowrap -mb-px ${
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => handleTabClick(tab.id as AdminTab)}
+              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium transition-colors border-b-2 whitespace-nowrap -mb-px cursor-pointer select-none rounded-t ${
                 isActive
-                  ? "border-charge text-charge font-semibold bg-paper/60"
-                  : "border-transparent text-muted hover:text-ink hover:bg-paper/30"
+                  ? "border-charge text-charge font-semibold bg-paper/60 shadow-sm"
+                  : "border-transparent text-muted hover:text-ink hover:bg-paper/40 active:bg-paper/60"
               }`}
             >
               <span>{tab.icon}</span>

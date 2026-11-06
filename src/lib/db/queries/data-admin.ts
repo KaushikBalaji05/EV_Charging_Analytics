@@ -239,11 +239,28 @@ export async function getSimulatorInfo(): Promise<SimulatorInfo> {
       ? "Stopped by operator"
       : null;
 
+  let simulatedStations: number[] = [];
+  if (Array.isArray(meta.stations) && meta.stations.length > 0) {
+    simulatedStations = meta.stations as number[];
+  } else {
+    try {
+      const activeRows = await query<{ station_id: number }>(
+        "SELECT station_id FROM charging_station WHERE operating_status = 'ACTIVE' ORDER BY station_id ASC"
+      );
+      simulatedStations = activeRows.map((r) => r.station_id);
+    } catch {
+      simulatedStations = [1, 2];
+    }
+    if (simulatedStations.length === 0) {
+      simulatedStations = [1, 2];
+    }
+  }
+
   return {
     status: finalStatus,
     pid,
     configuredIntervalMs: typeof meta.intervalMs === "number" ? meta.intervalMs : 5000,
-    simulatedStations: Array.isArray(meta.stations) ? (meta.stations as number[]) : [1, 2],
+    simulatedStations,
     latestTelemetryAt,
     recentLogs,
     startedAt: typeof meta.startedAt === "string" ? meta.startedAt : null,

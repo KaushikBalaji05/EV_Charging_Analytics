@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { MongoClient } from "mongodb";
+import { Pool } from "pg";
 
 // Auto-load .env.local if present
 const envLocalPath = path.resolve(process.cwd(), ".env.local");
@@ -30,7 +31,6 @@ if (fs.existsSync(envLocalPath)) {
 }
 
 const DEFAULT_INTERVAL_MS = 5000;
-const DEFAULT_STATIONS = [1, 2]; // Matches PostgreSQL sample data
 const LOCK_FILE = path.resolve(process.cwd(), ".simulator.pid");
 const META_FILE = path.resolve(process.cwd(), ".simulator.meta.json");
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017";
@@ -67,11 +67,91 @@ function writeMeta(meta: Partial<SimulatorMetadata>): void {
   }
 }
 
-// Station specifications (matching PostgreSQL Charging_Station table)
-const STATION_SPECS: Record<number, { name: string; capacityKw: number; voltageNominal: number }> = {
+// Station specifications (matching PostgreSQL Charging_Station table and seed dataset)
+export const STATION_SPECS: Record<number, { name: string; capacityKw: number; voltageNominal: number }> = {
   1: { name: "Central Charging Hub", capacityKw: 100, voltageNominal: 415 },
   2: { name: "Tech Park Charging Hub", capacityKw: 150, voltageNominal: 415 },
+  3: { name: "Indiranagar 100ft Rd Hub", capacityKw: 120, voltageNominal: 415 },
+  4: { name: "Koramangala 4th Block Hub", capacityKw: 150, voltageNominal: 415 },
+  5: { name: "Electronic City Phase 1 Hub", capacityKw: 200, voltageNominal: 415 },
+  6: { name: "Whitefield ITPL Hub", capacityKw: 180, voltageNominal: 415 },
+  7: { name: "HSR Layout Sector 1 Hub", capacityKw: 100, voltageNominal: 415 },
+  8: { name: "MG Road Metro Station Hub", capacityKw: 120, voltageNominal: 415 },
+  9: { name: "Hebbal Outer Ring Rd Hub", capacityKw: 240, voltageNominal: 415 },
+  10: { name: "Jayanagar 4th T Block Hub", capacityKw: 90, voltageNominal: 415 },
+  11: { name: "Bellandur EcoSpace Hub", capacityKw: 160, voltageNominal: 415 },
+  12: { name: "Marathahalli Bridge Hub", capacityKw: 140, voltageNominal: 415 },
+  13: { name: "Rajajinagar Industrial Hub", capacityKw: 150, voltageNominal: 415 },
+  14: { name: "Malleshwaram 8th Cross Hub", capacityKw: 100, voltageNominal: 415 },
+  15: { name: "Banashankari BDA Complex Hub", capacityKw: 110, voltageNominal: 415 },
+  16: { name: "Yelahanka New Town Hub", capacityKw: 130, voltageNominal: 415 },
+  17: { name: "Sarjapur Road Junction Hub", capacityKw: 150, voltageNominal: 415 },
+  18: { name: "BTM Layout 2nd Stage Hub", capacityKw: 100, voltageNominal: 415 },
+  19: { name: "Domlur Flyover Hub", capacityKw: 120, voltageNominal: 415 },
+  20: { name: "Yeshwanthpur Rail Transit Hub", capacityKw: 160, voltageNominal: 415 },
 };
+
+export const DEFAULT_STATIONS = [1, 2];
+
+let activeSpecs: Record<number, { name: string; capacityKw: number; voltageNominal: number }> = { ...STATION_SPECS };
+
+export function updateActiveSpecs(newSpecs: Record<number, { name: string; capacityKw: number; voltageNominal: number }>) {
+  activeSpecs = { ...activeSpecs, ...newSpecs };
+}
+
+export async function resolveTargetStations(explicitStations?: number[]): Promise<{
+  stations: number[];
+  specs: Record<number, { name: string; capacityKw: number; voltageNominal: number }>;
+}> {
+  const specs = { ...STATION_SPECS };
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (databaseUrl) {
+    try {
+      const pool = new Pool({
+        connectionString: databaseUrl,
+        connectionTimeoutMillis: 3000,
+        ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: false } : false,
+      });
+      const res = await pool.query<{
+        station_id: number;
+        station_name: string;
+        total_capacity_kw: string | number;
+      }>(
+        "SELECT station_id, station_name, total_capacity_kw FROM charging_station WHERE operating_status = 'ACTIVE' ORDER BY station_id ASC"
+      );
+      await pool.end();
+
+      if (res.rows.length > 0) {
+        for (const row of res.rows) {
+          specs[Number(row.station_id)] = {
+            name: row.station_name,
+            capacityKw: Number(row.total_capacity_kw),
+            voltageNominal: 415,
+          };
+        }
+
+        if (explicitStations && explicitStations.length > 0) {
+          return { stations: explicitStations, specs };
+        }
+
+        return {
+          stations: res.rows.map((r) => Number(r.station_id)),
+          specs,
+        };
+      }
+    } catch (err) {
+      // Fallback safely if PG query fails
+      console.warn("[simulator] PostgreSQL station discovery unavailable, using static fallback:", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const fallbackStations = explicitStations && explicitStations.length > 0
+    ? explicitStations
+    : Object.keys(STATION_SPECS).map(Number);
+
+  return { stations: fallbackStations, specs };
+}
 
 function createPrng(seed: number) {
   let s = seed >>> 0;
@@ -130,8 +210,9 @@ export function generateReading(
   stationId: number,
   timestamp: Date = new Date(),
   scenario: "diurnal" | "normal" | "overload" = "diurnal",
+  customSpecs?: Record<number, { name: string; capacityKw: number; voltageNominal: number }>,
 ): TelemetryPayload {
-  const spec = STATION_SPECS[stationId] ?? {
+  const spec = customSpecs?.[stationId] ?? activeSpecs[stationId] ?? STATION_SPECS[stationId] ?? {
     name: `Station ${stationId}`,
     capacityKw: 100,
     voltageNominal: 415,
@@ -230,9 +311,10 @@ function releaseLock(): void {
   }
 }
 
-function parseCliArgs(): { action: "run" | "stop" | "status" | "daemon"; options: SimulatorOptions } {
+function parseCliArgs(): { action: "run" | "stop" | "status" | "daemon"; options: SimulatorOptions; hasExplicitStations: boolean } {
   const args = process.argv.slice(2);
   let action: "run" | "stop" | "status" | "daemon" = "run";
+  let hasExplicitStations = false;
   const options: SimulatorOptions = {
     intervalMs: DEFAULT_INTERVAL_MS,
     stations: [...DEFAULT_STATIONS],
@@ -251,6 +333,7 @@ function parseCliArgs(): { action: "run" | "stop" | "status" | "daemon"; options
       options.intervalMs = parseInt(args[++i], 10);
     } else if (arg === "--stations" && args[i + 1]) {
       options.stations = args[++i].split(",").map((s) => parseInt(s.trim(), 10));
+      hasExplicitStations = true;
     } else if (arg === "--scenario" && args[i + 1]) {
       options.scenario = args[++i] as SimulatorOptions["scenario"];
     } else if (arg === "--count" && args[i + 1]) {
@@ -260,11 +343,11 @@ function parseCliArgs(): { action: "run" | "stop" | "status" | "daemon"; options
     }
   }
 
-  return { action, options };
+  return { action, options, hasExplicitStations };
 }
 
 async function main() {
-  const { action, options } = parseCliArgs();
+  const { action, options, hasExplicitStations } = parseCliArgs();
 
   if (action === "daemon") {
     const existing = checkLock();
@@ -330,7 +413,12 @@ async function main() {
     process.exit(0);
   }
 
-  // Action is "run"
+  // Action is "run" (continuous or --once)
+  const explicit = hasExplicitStations ? options.stations : undefined;
+  const resolved = await resolveTargetStations(explicit);
+  options.stations = resolved.stations;
+  updateActiveSpecs(resolved.specs);
+
   acquireLock();
   writeMeta({
     pid: process.pid,

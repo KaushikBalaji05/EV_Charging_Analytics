@@ -214,8 +214,15 @@ export function DatabaseOverview({
             </div>
             <div className="flex justify-between py-1 border-b border-rule/50">
               <span className="text-muted">Simulated Stations</span>
-              <span className="font-mono text-ink">
-                Stations #{simulator.simulatedStations.join(", #")}
+              <span
+                className="font-mono text-ink truncate max-w-[200px]"
+                title={simulator.simulatedStations.length > 0 ? `Stations #${simulator.simulatedStations.join(", #")}` : "None"}
+              >
+                {simulator.simulatedStations.length > 5
+                  ? `${simulator.simulatedStations.length} Stations (#${simulator.simulatedStations.slice(0, 3).join(", #")}…)`
+                  : simulator.simulatedStations.length > 0
+                  ? `Stations #${simulator.simulatedStations.join(", #")}`
+                  : "None"}
               </span>
             </div>
             <div className="flex justify-between py-1 border-b border-rule/50">

@@ -218,8 +218,15 @@ export function LiveTelemetryMonitor({ initialSimulator }: LiveTelemetryMonitorP
             <p className="mt-0.5 text-sm font-bold text-ink">
               {simulator.simulatedStations.length} Stations Target
             </p>
-            <span className="text-[10px] text-muted">
-              Station #{simulator.simulatedStations.join(", #")}
+            <span
+              className="text-[10px] text-muted truncate block"
+              title={simulator.simulatedStations.length > 0 ? `Station #${simulator.simulatedStations.join(", #")}` : "None"}
+            >
+              {simulator.simulatedStations.length > 5
+                ? `Stations #${simulator.simulatedStations.slice(0, 4).join(", #")} +${simulator.simulatedStations.length - 4} more`
+                : simulator.simulatedStations.length > 0
+                ? `Station #${simulator.simulatedStations.join(", #")}`
+                : "Awaiting configuration"}
             </span>
           </div>
 
@@ -336,7 +343,7 @@ export function LiveTelemetryMonitor({ initialSimulator }: LiveTelemetryMonitorP
             Station Electrical Telemetry &amp; Grid Ingestion
           </h3>
           <span className="text-xs text-muted font-mono">
-            Displaying {displayedStations.length} of {latestList.length} stations
+            Displaying {displayedStations.length} of {latestList.length} stations · {streamingCount} Streaming
           </span>
         </div>
 

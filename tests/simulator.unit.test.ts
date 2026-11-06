@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateReading } from "../scripts/telemetry-simulator";
+import { generateReading, resolveTargetStations, STATION_SPECS } from "../scripts/telemetry-simulator";
 
 describe("Telemetry Simulator Engine (Unit Tests)", () => {
   it("generates readings labeled with source: simulated", () => {
@@ -46,5 +46,37 @@ describe("Telemetry Simulator Engine (Unit Tests)", () => {
     const st2 = generateReading(2, new Date(), "normal");
     expect(st1.metadata.capacity_kw).toBe(100);
     expect(st2.metadata.capacity_kw).toBe(150);
+  });
+
+  it("supports extended station specs up to 20 stations with realistic Bengaluru hub names and capacities", () => {
+    expect(Object.keys(STATION_SPECS).length).toBeGreaterThanOrEqual(20);
+    expect(STATION_SPECS[3].name).toBe("Indiranagar 100ft Rd Hub");
+    expect(STATION_SPECS[3].capacityKw).toBe(120);
+    expect(STATION_SPECS[4].name).toBe("Koramangala 4th Block Hub");
+    expect(STATION_SPECS[4].capacityKw).toBe(150);
+    expect(STATION_SPECS[5].name).toBe("Electronic City Phase 1 Hub");
+    expect(STATION_SPECS[5].capacityKw).toBe(200);
+    expect(STATION_SPECS[6].name).toBe("Whitefield ITPL Hub");
+    expect(STATION_SPECS[6].capacityKw).toBe(180);
+
+    const st3 = generateReading(3, new Date(), "normal");
+    expect(st3.metadata.station_name).toBe("Indiranagar 100ft Rd Hub");
+    expect(st3.metadata.capacity_kw).toBe(120);
+
+    const st5 = generateReading(5, new Date(), "normal");
+    expect(st5.metadata.station_name).toBe("Electronic City Phase 1 Hub");
+    expect(st5.metadata.capacity_kw).toBe(200);
+  });
+
+  it("resolves target stations honoring explicit station list and custom specs", async () => {
+    const resolved = await resolveTargetStations([1, 2, 3, 4, 5, 6]);
+    expect(resolved.stations).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(resolved.specs[3].capacityKw).toBe(120);
+
+    const customReading = generateReading(999, new Date(), "normal", {
+      999: { name: "Custom Solar Hub", capacityKw: 350, voltageNominal: 415 },
+    });
+    expect(customReading.metadata.station_name).toBe("Custom Solar Hub");
+    expect(customReading.metadata.capacity_kw).toBe(350);
   });
 });
